@@ -8,10 +8,12 @@ fastmath. The optional backend warms in the image worker before editing.
 import logging
 import os
 import sys
+import threading
 import numpy as np
 from . import performance
 
 log = logging.getLogger(__name__)
+_kernel_lock = threading.Lock()
 JIT_CACHE = not getattr(sys, 'frozen', False)
 os.environ.setdefault('NUMBA_NUM_THREADS', str(min(8, performance.THREADS)))
 try:
@@ -111,16 +113,23 @@ def _threads():
     set_num_threads(min(8, performance.THREADS, get_num_threads()))
 
 
+def _execute(kernel, *arguments):
+    # Workqueue cannot accept simultaneous launches from different image workers.
+    # Keep parallelism inside each kernel while serializing backend entry points.
+    with _kernel_lock:
+        _threads()
+        return kernel(*arguments)
+
+
 def interp(x, table, axis=None):
     if not enabled or x.dtype != np.float32:
         return None
-    _threads()
     flat = np.ascontiguousarray(x).ravel()
     table = np.asarray(table, np.float64)
     result = (
-        _uniform(flat, table)
+        _execute(_uniform, flat, table)
         if axis is None
-        else _sparse(flat, np.asarray(axis, np.float64), table)
+        else _execute(_sparse, flat, np.asarray(axis, np.float64), table)
     )
     return result.reshape(x.shape)
 
@@ -128,17 +137,17 @@ def interp(x, table, axis=None):
 def hsl(hsv, axis, controls):
     if not enabled:
         return None
-    _threads()
-    return _hsl(hsv.reshape(-1, 3), np.asarray(axis, np.float64), controls).reshape(hsv.shape)
+    return _execute(_hsl, hsv.reshape(-1, 3), np.asarray(axis, np.float64), controls).reshape(
+        hsv.shape
+    )
 
 
 def range_srgb(linear, weights, a):
     if not enabled:
         return None
-    _threads()
     controls = np.asarray([a[k] for k in ('shadows', 'highlights', 'blacks', 'whites')], np.float32)
-    return _range_srgb(
-        linear.reshape(-1, 3), weights.reshape(4, -1), controls, float(a['contrast'])
+    return _execute(
+        _range_srgb, linear.reshape(-1, 3), weights.reshape(4, -1), controls, float(a['contrast'])
     ).reshape(linear.shape)
 
 
