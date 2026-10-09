@@ -864,8 +864,6 @@ class NaturalLanguageMixin:
             or not self.nl_voice.isEnabled()
         ):
             return
-        if host.MACOS and not self.nl_microphone_permission():
-            return
         if self.nl_recorder.start():
             self.nl_voice.setText('停止')
             self.nl_meter.setValue(0)
@@ -879,24 +877,6 @@ class NaturalLanguageMixin:
             speech.recognizer()
         except Exception:
             pass
-
-    def nl_microphone_permission(self):
-        from PySide6.QtCore import QMicrophonePermission
-        from PySide6.QtWidgets import QApplication
-
-        permission = QMicrophonePermission()
-        status = QApplication.instance().checkPermission(permission)
-        if status == Qt.PermissionStatus.Granted:
-            return True
-        if status == Qt.PermissionStatus.Undetermined:
-            QApplication.instance().requestPermission(
-                permission, self, lambda *_: self.nl_toggle_voice()
-            )
-            return False
-        self.nl_status.setText(
-            '没有麦克风权限：请在“系统设置 → 隐私与安全性 → 麦克风”中允许 CCRaw。'
-        )
-        return False
 
     def nl_level(self, value):
         self.nl_meter.setValue(int(value * 100))

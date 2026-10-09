@@ -1,4 +1,4 @@
-"""Float32 linear-light RAW pipeline, masks and optional GPU (DirectML / Metal / CUDA) processing."""
+"""Float32 linear-light RAW pipeline, masks and optional GPU (DirectML / CUDA) processing."""
 
 from __future__ import annotations
 import os

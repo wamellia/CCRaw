@@ -3,7 +3,6 @@ from . import resources
 """Read-only camera metadata and temperature corrections relative to as-shot WB."""
 import json
 import os
-import shutil
 import subprocess
 from pathlib import Path
 import numpy as np
@@ -12,16 +11,11 @@ import numpy as np
 def exiftool():
     """Command prefix for the bundled ExifTool, or ``None`` when it is not installed.
 
-    Windows uses the standalone ``exiftool.exe``.  macOS runs the pure-Perl
-    Image-ExifTool distribution in ``assets/exiftool/unix`` with the system Perl.
+    Windows uses the standalone ``exiftool.exe``.
     """
     folder = resources.asset_path('exiftool')
-    if os.name == 'nt':
-        exe = folder / 'exiftool.exe'
-        return [str(exe)] if exe.exists() else None
-    script = folder / 'unix' / 'exiftool'
-    perl = '/usr/bin/perl' if Path('/usr/bin/perl').exists() else shutil.which('perl')
-    return [perl, str(script)] if perl and script.exists() else None
+    exe = folder / 'exiftool.exe'
+    return [str(exe)] if exe.is_file() else None
 
 
 def metadata(path):

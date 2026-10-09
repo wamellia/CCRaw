@@ -9,10 +9,10 @@ from ccraw import host, model
 
 
 def test_release_identity_is_independent():
-    from ccraw import __version__
+    from ccraw import __version__, branding
 
     assert __version__ == '0.1.0'
-    assert host.BUNDLE_ID == 'org.ccraw.desktop'
+    assert branding.NAME == 'CCRaw'
 
 
 def test_data_and_cache_can_be_isolated_without_user_profile(monkeypatch, tmp_path):

@@ -1,20 +1,15 @@
-"""ONNX execution on a real GPU (Windows DirectML / TensorRT, macOS Core ML), with a CPU fallback."""
+"""Windows ONNX execution through DirectML / CUDA / TensorRT, with a CPU fallback."""
 
 from __future__ import annotations
 
-import collections
 import ctypes
 import json
 import logging
 import os
-import shutil
-import sys
 import tempfile
 import threading
-import types
 from pathlib import Path
 
-import numpy as np
 
 from . import performance
 
@@ -122,14 +117,7 @@ def dxgi_adapters():
 
 
 def preferred_adapter():
-    """Most dedicated VRAM wins; ``CCRAW_DML_DEVICE=<DXGI index>`` forces one adapter.
-
-    On macOS the single Metal device is returned in the same shape.
-    """
-    if sys.platform == 'darwin':
-        from . import metal
-
-        return metal.device_info()
+    """Most dedicated VRAM wins; ``CCRAW_DML_DEVICE=<DXGI index>`` forces one adapter."""
     adapters = dxgi_adapters()
     forced = os.environ.get('CCRAW_DML_DEVICE', '').strip()
     if forced:
@@ -140,10 +128,8 @@ def preferred_adapter():
     return max(adapters, key=lambda item: item[2]) if adapters else None
 
 
-MODES = ('auto', 'cpu', 'dml', 'cuda', 'trt', 'metal')
+MODES = ('auto', 'cpu', 'dml', 'cuda', 'trt')
 NVIDIA = 0x10DE
-COREML = 'CoreMLExecutionProvider'
-COREML_UNITS = ('CPUAndGPU', 'ALL', 'CPUAndNeuralEngine', 'CPUOnly')
 
 
 def adapter_driver(adapter):
@@ -162,7 +148,7 @@ class PluginDevices(list):
 
 
 def requested_mode():
-    """``CCRAW_COMPUTE`` = auto (default) | cpu | dml | cuda | trt | metal, for troubleshooting and tests."""
+    """``CCRAW_COMPUTE`` = auto (default) | cpu | dml | cuda | trt, for troubleshooting and tests."""
     mode = os.environ.get('CCRAW_COMPUTE', 'auto').strip().lower()
     return mode if mode in MODES else 'auto'
 
@@ -172,173 +158,18 @@ def cupy_enabled():
     return os.environ.get('CCRAW_EXPERIMENTAL_CUPY') == '1' and requested_mode() in ('auto', 'cuda')
 
 
-def coreml_options():
-    """Core ML provider options: the Apple GPU through Metal by default.
-
-    ``CCRAW_COREML_UNITS=ALL`` also allows the Neural Engine.  Models compile in a
-    temporary folder at session creation (0.1–2 s); no persistent cache is kept.
-    """
-    units = os.environ.get('CCRAW_COREML_UNITS', 'CPUAndGPU')
-    return {
-        'ModelFormat': 'MLProgram',
-        'MLComputeUnits': units if units in COREML_UNITS else 'CPUAndGPU',
-        'RequireStaticInputShapes': '0',
-        'EnableOnSubgraphs': '0',
-    }
-
-
-E5_CACHE = 'com.apple.e5rt.e5bundlecache'
-_E5_BEFORE = None  # source runs: runtime cache entries that existed when the worker started
-
-
-def _process_alive(pid):
-    if os.name == 'nt':
-        return True  # os.kill(pid, 0) would terminate the process on Windows
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except OSError:
-        return True
-    return True
-
-
-def coreml_housekeeping():
-    """Delete Core ML files that are never read again.
-
-    ONNX Runtime compiles every Core ML session into a new temporary
-    ``onnxruntime-<uuid>-<pid>-<n>`` folder and ``.mlmodelc`` bundle, which a
-    killed or crashed worker leaves behind, and Core ML's runtime caches one
-    compiled bundle per such path in ~/Library/Caches/<app>/com.apple.e5rt.e5bundlecache.
-    The paths never repeat, so in testing both only grew, by hundreds of MB per
-    session.  The AI worker calls this when it starts and stops.  The bundled app's
-    runtime cache is cleared; a source run shares Python's cache folder with other
-    programs, so only the entries added since the worker started are removed.
-    """
-    global _E5_BEFORE
-    if sys.platform != 'darwin':
-        return
-    for path in Path(tempfile.gettempdir()).glob('onnxruntime-*'):
-        fields = path.name.split('.')[0].split('-')
-        if len(fields) != 8 or not fields[6].isdigit():
-            continue
-        pid = int(fields[6])
-        if pid == os.getpid() or _process_alive(pid):
-            continue
-        if path.is_dir() and not path.is_symlink():
-            shutil.rmtree(path, ignore_errors=True)
-        else:
-            path.unlink(missing_ok=True)
-    if getattr(sys, 'frozen', False):
-        from . import host
-
-        shutil.rmtree(
-            Path.home() / 'Library' / 'Caches' / host.BUNDLE_ID / E5_CACHE, ignore_errors=True
-        )
-        return
-    folder = Path.home() / 'Library' / 'Caches' / Path(sys.executable).name / E5_CACHE
-    entries = set(folder.glob('*/*'))
-    if _E5_BEFORE is None:
-        _E5_BEFORE = entries
-        return
-    for path in entries - _E5_BEFORE:
-        shutil.rmtree(path, ignore_errors=True)
-
-
-def signature(ort, path):
-    """Inputs, outputs and the named dynamic input dimensions ``{symbol: (input, axis)}`` of a model."""
-    options = ort.SessionOptions()
-    options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_DISABLE_ALL
-    model = ort.InferenceSession(path, sess_options=options, providers=['CPUExecutionProvider'])
-    describe = lambda values: [
-        types.SimpleNamespace(name=v.name, type=v.type, shape=list(v.shape)) for v in values
-    ]
-    inputs, outputs = describe(model.get_inputs()), describe(model.get_outputs())
-    symbols = {}
-    for item in inputs:
-        for axis, dim in enumerate(item.shape):
-            if dim is None:  # an unnamed dynamic dimension cannot be fixed
-                return inputs, outputs, None
-            if isinstance(dim, str):
-                symbols.setdefault(dim, (item.name, axis))
-    return inputs, outputs, symbols
-
-
-class ShapedSessions:
-    """Core ML sessions compiled per input size for models with dynamic height / width.
-
-    With dynamic shapes Core ML cannot plan DRUNet and splits NAFNet into 80
-    partitions (slower than the CPU); with the symbolic dimensions fixed to the
-    tile size the restoration models run 8–10x faster than the CPU on an M1 Pro.
-    Tiling produces only a few distinct sizes, so the most recent ``LIMIT``
-    sessions are kept.  Results match the dynamic model: nothing is padded.
-    """
-
-    LIMIT = 4
-
-    def __init__(self, ort, path, providers, described, profiled):
-        self.ort, self.path, self.providers = ort, path, providers
-        self.inputs, self.outputs, self.symbols = described
-        self.profiled = profiled  # options of the first session, which is verified
-        self.sessions = collections.OrderedDict()
-        self.current = None
-
-    def _session(self, feeds):
-        key = tuple(
-            (name, tuple(np.shape(feeds[name])))
-            for name in sorted({n for n, _ in self.symbols.values()})
-        )
-        session = self.sessions.pop(key, None)
-        if session is None:
-            options, self.profiled = self.profiled or performance.session_options(), None
-            for symbol, (name, axis) in self.symbols.items():
-                options.add_free_dimension_override_by_name(
-                    symbol, int(np.shape(feeds[name])[axis])
-                )
-            session = self.ort.InferenceSession(
-                self.path, sess_options=options, providers=self.providers
-            )
-            if COREML not in session.get_providers():
-                raise RuntimeError('Core ML 未接管该尺寸的模型')
-            log.info('%s: Core ML session for %s', Path(self.path).name, dict(key))
-        self.sessions[key] = session
-        while len(self.sessions) > self.LIMIT:
-            self.sessions.popitem(last=False)
-        self.current = session
-        return session
-
-    def run(self, output_names, inputs):
-        return self._session(inputs).run(output_names, inputs)
-
-    def end_profiling(self):
-        return self.current.end_profiling()
-
-    def get_providers(self):
-        return [COREML, 'CPUExecutionProvider']
-
-    def get_inputs(self):
-        return self.inputs
-
-    def get_outputs(self):
-        return self.outputs
-
-
 def provider_plan(available, adapter, accelerated=True, models=False, excluded=(), status=None):
     """Ordered (providers, provider, device) attempts before the CPU fallback.
 
     Neural models (``models=True``) on an NVIDIA GeForce RTX GPU first try TensorRT
     for RTX from the Windows ML catalog (Windows 11 24H2+); DirectML itself is in
-    maintenance mode upstream.  On macOS they run through Core ML on the Apple GPU
-    (Metal).  Providers in ``excluded`` crashed before on this GPU and driver and
+    maintenance mode upstream. Providers in ``excluded`` crashed on this GPU and driver and
     are skipped (see ai_worker.CompatRecord).
     """
     mode = requested_mode()
     if not accelerated or mode == 'cpu':
         return []
     attempts = []
-    if models and mode in ('auto', 'metal') and COREML in available and COREML not in excluded:
-        device = adapter[1] if adapter is not None and len(adapter) > 1 else 'Apple GPU'
-        attempts.append(([(COREML, coreml_options()), 'CPUExecutionProvider'], COREML, device))
     if (
         models
         and mode in ('auto', 'trt')
@@ -420,11 +251,7 @@ class Session:
         self._verified = False
         self._lock = threading.Lock()
         available = ort.get_available_providers()
-        adapter = (
-            preferred_adapter()
-            if accelerated and (os.name == 'nt' or sys.platform == 'darwin')
-            else None
-        )
+        adapter = preferred_adapter() if accelerated and os.name == 'nt' else None
         models = not isinstance(path, bytes)
         attempts = provider_plan(available, adapter, accelerated, models, excluded, status)
         last_error = ''
@@ -449,15 +276,6 @@ class Session:
                 if provider == 'DmlExecutionProvider':
                     options.enable_mem_pattern = False
                     options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
-                if provider == COREML:
-                    described = signature(ort, self.path)
-                    if described[2]:
-                        # Compiled per tile size at first use; run() verifies and falls back.
-                        self._session = ShapedSessions(
-                            ort, self.path, providers, described, options
-                        )
-                        self.provider, self.device = provider, device
-                        break
                 candidate = ort.InferenceSession(
                     self.path, sess_options=options, providers=providers
                 )

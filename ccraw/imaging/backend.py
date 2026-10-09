@@ -1,7 +1,6 @@
-"""Float32 linear-light RAW pipeline, masks and optional GPU (DirectML / Metal / CUDA) processing."""
+"""Float32 linear-light RAW pipeline, masks and optional GPU (DirectML / CUDA) processing."""
 
 from __future__ import annotations
-import sys
 import numpy as np
 from .. import large_image, performance, compute, gpu_graphs, cpu_ops
 
@@ -9,8 +8,7 @@ from .. import engine as pipeline
 
 
 class Backend:
-    """Pixel backend. DirectML / CUDA run the pointwise ONNX graphs, Metal the same stages
-    as compute kernels on macOS; NumPy is the reference.
+    """Windows pixel backend. DirectML / CUDA run pointwise ONNX graphs; NumPy is the reference.
 
     CuPy is an experimental, opt-in path (``CCRAW_EXPERIMENTAL_CUPY=1``);
     ``CCRAW_COMPUTE=cpu`` forces the CPU for troubleshooting.
@@ -19,16 +17,12 @@ class Backend:
     def __init__(self, mode='auto'):
         self.xp = np
         self.use_dml = False
-        self.metal = None
         self._sessions = {}
         self.name = 'CPU · NumPy / OpenCV'
         self.warning = ''
         if mode == 'cpu' or compute.requested_mode() == 'cpu':
             if mode != 'cpu':
                 self.warning = 'CCRAW_COMPUTE=cpu：已按设置使用 CPU。'
-            return
-        if sys.platform == 'darwin':
-            self._init_metal()
             return
         if compute.cupy_enabled():
             try:
@@ -63,31 +57,18 @@ class Backend:
         if self.xp is np and (not self.use_dml):
             self.warning = '没有可用的 DirectML / CUDA，已使用 CPU。'
 
-    def _init_metal(self):
-        from .. import metal
-
-        if compute.requested_mode() not in ('auto', 'metal'):
-            self.warning = f'CCRAW_COMPUTE={compute.requested_mode()} 不适用于 macOS，已使用 CPU。'
-            return
-        self.metal = metal.pipeline()
-        if self.metal is None:
-            self.warning = 'Metal 不可用，已使用 CPU：' + metal.last_error()
-        else:
-            self.name = 'Metal · ' + self.metal.name
-
     @property
     def gpu_label(self):
-        return 'Metal' if self.metal is not None or sys.platform == 'darwin' else 'DirectML'
+        return 'DirectML'
 
     @property
     def gpu_pointwise(self):
-        """True while the fused stages run on the GPU (DirectML graphs or Metal kernels)."""
-        return self.use_dml or self.metal is not None
+        """True while fused stages run through DirectML graphs."""
+        return self.use_dml
 
     def _disable_gpu(self, warning):
         self.name = f'CPU · {self.gpu_label} 回退'
         self.use_dml = False
-        self.metal = None
         self.warning = warning
         pipeline.log.warning('GPU pixel graphs disabled: %s', warning)
         compute.state.report('CPUExecutionProvider', warning=warning)
@@ -99,14 +80,6 @@ class Backend:
 
     def _run_graph(self, kind, image, inputs):
         """Channel-last 1024² tiles: pointwise graphs have no boundary effects."""
-        if self.metal is not None:
-            from ..metal import PROVIDER
-
-            out = self.metal.run(kind, image, inputs)
-            compute.state.report(
-                PROVIDER, self.metal.name, f'Metal · {self.metal.name} · 逐像素显影'
-            )
-            return out
         session = self._session(kind)
         height, width = image.shape[:2]
         out = large_image.allocate(image.shape)

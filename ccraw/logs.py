@@ -1,8 +1,8 @@
 """Rotating diagnostic log for the desktop application.
 
 Windowed builds have no console, so GPU fallbacks, job failures and state
-transitions are written to %LOCALAPPDATA%\\CCRaw\\logs\\ccraw.log
-(macOS: ~/Library/Logs/CCRaw/ccraw.log).
+transitions are written to %LOCALAPPDATA%\\CCRaw\\logs\\ccraw.log.
+
 Set CCRAW_LOG_LEVEL=DEBUG to include scheduler transitions.
 """
 
@@ -89,8 +89,6 @@ def configure(level=None, filename='ccraw.log'):
 def describe_system():
     """One log line per GPU with its driver, plus the ONNX Runtime build."""
     log = logging.getLogger('ccraw')
-    if sys.platform == 'darwin':
-        return _describe_macos(log)
     try:
         from . import compute, winml
         import onnxruntime as ort
@@ -110,28 +108,5 @@ def describe_system():
                 dedicated // 2**20,
                 driver[0] if driver else '?',
             )
-    except Exception:
-        log.warning('system description failed', exc_info=True)
-
-
-def _describe_macos(log):
-    """macOS version, chip and Metal device, plus the ONNX Runtime build."""
-    try:
-        import platform
-        import onnxruntime as ort
-        from . import metal
-
-        log.info(
-            'macOS %s %s · onnxruntime %s · providers %s',
-            metal.macos_version(),
-            platform.machine(),
-            ort.__version__,
-            ', '.join(ort.get_available_providers()),
-        )
-        info = metal.device_info()
-        if info:
-            log.info('Metal device: %s · recommended working set %d MiB', info[1], info[2] // 2**20)
-        else:
-            log.info('Metal device: none')
     except Exception:
         log.warning('system description failed', exc_info=True)

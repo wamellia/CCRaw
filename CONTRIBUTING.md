@@ -1,6 +1,6 @@
 # 开发
 
-使用 Python 3.12，安装 `requirements.txt` 与 `requirements-dev.txt`。每个环境只安装一种 ONNX Runtime。
+在 Windows 64 位环境中使用 Python 3.12，安装 `requirements.txt` 与 `requirements-dev.txt`。每个环境只安装一种 ONNX Runtime。
 
 ```powershell
 python -m ruff check ccraw tools tests main.py

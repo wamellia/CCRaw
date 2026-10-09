@@ -60,6 +60,9 @@ def main(argv=None):
             'CCRaw: ccraw [photo.ccraw | image | album.ccrawalbum ...]\nOptions: --version, --help'
         )
         return 0
+    if sys.platform != 'win32':
+        print('CCRaw supports Windows only.', file=sys.stderr)
+        return 2
     import multiprocessing
 
     # The frozen app re-enters here to start the AI worker process (spawn).

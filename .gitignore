@@ -44,9 +44,7 @@ photos/
 exports/
 outputs/
 diagnostics/
-.venv-macos/
 .venv-release/
-*.dmg
 assets/models/sensevoice/
 
 .ruff_cache/

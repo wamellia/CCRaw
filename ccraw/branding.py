@@ -2,7 +2,6 @@
 
 NAME = 'CCRaw'
 SLUG = 'ccraw'
-BUNDLE_ID = 'org.ccraw.desktop'
 PROJECT_SUFFIX = '.ccraw'
 ALBUM_SUFFIX = '.ccrawalbum'
 PRESET_SUFFIX = '.ccrawpreset'

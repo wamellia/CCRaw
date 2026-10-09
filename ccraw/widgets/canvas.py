@@ -1,5 +1,4 @@
 from __future__ import annotations
-import sys
 import numpy as np
 from ..ui.theme import color
 from PySide6.QtCore import Qt, Signal, QEvent, QPointF, QRectF
@@ -193,20 +192,6 @@ class Canvas(QWidget):
     def wheelEvent(self, e):
         if self.image is None:
             return
-        if sys.platform == 'darwin':
-            # Trackpad (and Magic Mouse) scrolls carry a phase; plain mouse wheels do not, even though
-            # Qt also gives them a pixel delta.  Two fingers pan; ⌘ + scroll and wheels zoom smoothly.
-            if (
-                e.phase() != Qt.ScrollPhase.NoScrollPhase
-                and not e.modifiers() & Qt.KeyboardModifier.ControlModifier
-            ):
-                self.offset += QPointF(e.pixelDelta())
-                self.viewport_changed.emit()
-                self.update()
-                return
-            if e.angleDelta().y():
-                self.zoom_by(1.15 ** (e.angleDelta().y() / 120), e.position())
-            return
         self.zoom_by(1.15 if e.angleDelta().y() > 0 else 1 / 1.15, e.position())
 
     def zoom_by(self, factor, position):
@@ -217,7 +202,7 @@ class Canvas(QWidget):
         center = QPointF(self.width() / 2, self.height() / 2)
         relative = position - center
         self.offset = relative - (relative - self.offset) * (self.zoom / old_zoom)
-        hint = '双指平移' if sys.platform == 'darwin' else '中键平移'
+        hint = '中键平移'
         self.zoom_changed.emit(
             f'原图 {fit * self.zoom * self.devicePixelRatioF() * 100:.0f}% · {hint}'
         )
@@ -225,7 +210,7 @@ class Canvas(QWidget):
         self.update()
 
     def event(self, e):
-        # macOS trackpad pinch arrives as a native zoom gesture.
+        # Native zoom gestures use the same viewport transform as the mouse wheel.
         if e.type() == QEvent.Type.NativeGesture and self.image is not None:
             if e.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
                 self.zoom_by(max(0.2, 1 + e.value()), e.position())

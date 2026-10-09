@@ -4,9 +4,8 @@ A GPU driver or execution-provider fault inside ONNX Runtime is a native crash
 that no Python code can catch.  AI super-resolution, denoising and automatic
 masks therefore run their ONNX sessions in one long-lived worker process.  When
 that process dies, the provider it was using is recorded for this GPU + driver
-(``%LOCALAPPDATA%\\CCRaw\\gpu-compat.json``; macOS: ``~/Library/Application
-Support/CCRaw``), the worker restarts, and the same tile is retried on the next
-provider (TensorRT for RTX -> DirectML -> CPU; macOS: Core ML -> CPU).
+(``%LOCALAPPDATA%\\CCRaw\\gpu-compat.json``), the worker restarts, and the same
+tile is retried on the next provider (TensorRT for RTX -> DirectML -> CPU).
 The editor itself keeps running and later sessions skip the crashing provider.
 """
 
@@ -16,8 +15,6 @@ import json
 import logging
 import multiprocessing
 import os
-import signal
-import sys
 import threading
 import time
 import types
@@ -45,16 +42,11 @@ def _serve(conn, log_level):
 
     winml.preload_system_runtime()
     logs.configure(level=log_level, filename='ccraw-worker.log')
-    if os.name != 'nt':
-        # Daemonic workers are stopped with SIGTERM: unwind so the sessions delete their files.
-        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    compute.coreml_housekeeping()
     sessions = {}
     try:
         _requests(conn, sessions)
     finally:
         sessions.clear()
-        compute.coreml_housekeeping()
 
 
 def _requests(conn, sessions):

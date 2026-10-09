@@ -1,4 +1,4 @@
-"""Render repository-owned vector artwork for Windows, source and macOS builds."""
+"""Render repository-owned vector artwork for Windows and source builds."""
 
 from pathlib import Path
 from PIL import Image

@@ -3,7 +3,7 @@ from . import resources
 import copy
 import sys
 from pathlib import Path
-from PySide6.QtCore import QEvent, QObject, QThreadPool, QTimer, Signal, QSettings
+from PySide6.QtCore import QThreadPool, QTimer, Signal, QSettings
 from PySide6.QtGui import QFontDatabase, QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget
 from . import engine, model
@@ -118,32 +118,6 @@ class MainWindow(
         self.refresh()
 
 
-class FileOpenEvents(QObject):
-    """macOS delivers Finder “Open With”, Dock drops and ``open -a`` as QFileOpenEvent, not argv."""
-
-    def __init__(self, window):
-        super().__init__(window)
-        self.window = window
-        self.paths = []
-        # Several files opened together arrive as separate events; import them as one batch.
-        self.timer = QTimer(self)
-        self.timer.setSingleShot(True)
-        self.timer.setInterval(150)
-        self.timer.timeout.connect(self.flush)
-
-    def eventFilter(self, watched, event):
-        if event.type() == QEvent.Type.FileOpen and event.file():
-            self.paths.append(event.file())
-            self.timer.start()
-            return True
-        return False
-
-    def flush(self):
-        paths, self.paths = self.paths, []
-        if paths:
-            self.window.import_paths(paths)
-
-
 def main():
     from . import logs
 
@@ -157,8 +131,6 @@ def main():
     app.setStyle('Fusion')
     apply_theme(app, QSettings('CCRaw', 'CCRaw').value('appearance', 'light'))
     window = MainWindow()
-    if sys.platform == 'darwin':
-        app.installEventFilter(FileOpenEvents(window))
     window.show()
     if len(sys.argv) > 1 and Path(sys.argv[1]).is_file():
         QTimer.singleShot(100, lambda: window.open_path(sys.argv[1]))

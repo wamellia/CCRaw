@@ -1,8 +1,6 @@
 """GPU graph parity and status handling; the actual DirectML run is a hardware check."""
 
 import numpy as np
-import pytest
-import sys
 import threading
 import types
 
@@ -30,10 +28,6 @@ def test_tonal_graph_matches_cpu_across_adjustments():
     np.testing.assert_allclose(gpu_graph, cpu, rtol=2e-5, atol=3e-6)
 
 
-@pytest.mark.skipif(
-    sys.platform == 'darwin',
-    reason='DXGI adapters exist only on Windows; macOS has one Metal device',
-)
 def test_preferred_adapter_uses_dedicated_memory(monkeypatch):
     monkeypatch.setattr(
         compute,

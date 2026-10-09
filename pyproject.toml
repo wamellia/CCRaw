@@ -5,13 +5,13 @@ build-backend = 'setuptools.build_meta'
 [project]
 name = 'ccraw'
 dynamic = ['version', 'dependencies']
-description = 'Open-source desktop RAW editor with full-quality interactive previews'
+description = 'Windows desktop RAW editor with real-time previews and image generation'
 readme = 'README.md'
 requires-python = '>=3.12,<3.14'
 license = 'MIT'
 license-files = ['LICENSE', 'NOTICE']
 authors = [{name = 'CCRaw contributors'}]
-classifiers = ['Topic :: Multimedia :: Graphics :: Editors', 'Operating System :: Microsoft :: Windows', 'Operating System :: MacOS', 'Programming Language :: Python :: 3']
+classifiers = ['Topic :: Multimedia :: Graphics :: Editors', 'Operating System :: Microsoft :: Windows', 'Programming Language :: Python :: 3']
 
 [project.scripts]
 ccraw = 'ccraw.bootstrap:main'

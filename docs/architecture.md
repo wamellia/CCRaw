@@ -1,6 +1,6 @@
 # Architecture
 
-Qt desktop application. `app` composes document, preview, adjustment, workspace and platform services.
+Windows Qt desktop application. `app` composes document, preview, adjustment, workspace and platform services. Image processing supports CPU, DirectML and optional CUDA; model sessions can also use TensorRT.
 
 ```mermaid
 flowchart TD
@@ -21,7 +21,7 @@ The public model and engine modules are stable facades. The image pipeline retai
 
 Preview input is coalesced. The GUI owns edit state and QPixmap; the single image worker owns immutable snapshots, image processing, histogram/overlay preparation and QImage conversion. Epoch and document tokens reject incompatible old results. Fit view keeps the standard preview resolution; zoomed rendering evaluates visible original-pixel regions with neighborhood margins and global effect coordinates.
 
-Resource resolution supports CCRAW_ASSET_DIR, frozen bundled assets, source assets and installed package resources. CCRAW_DATA_DIR / CCRAW_CACHE_DIR allow independent deployment and tests. Normal platform defaults use CCRaw's own per-user namespace.
+Resource resolution supports CCRAW_ASSET_DIR, frozen bundled assets, source assets and installed package resources. CCRAW_DATA_DIR / CCRAW_CACHE_DIR allow independent deployment and tests. Windows defaults use `%LOCALAPPDATA%/CCRaw` for application data and its `cache` and `logs` subfolders.
 
 Project, preset and album saves use same-directory temporary files and atomic replacement. Existing files survive a failed replacement. Legacy identifiers/extensions are read explicitly; new writes use CCRaw identifiers without changing the validated recipe schema solely for branding.
 

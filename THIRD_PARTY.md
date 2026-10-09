@@ -30,11 +30,7 @@ CCRaw 的源码许可不替代依赖许可。便携包保留动态库，Qt / PyS
 | NAFNet SIDD | MIT，Megvii，https://github.com/megvii-research/NAFNet；assets/NAFNet-LICENSE.txt |
 | SenseVoice-Small 语音识别模型 | FunASR 模型开源协议 1.1，FunAudioLLM / 阿里巴巴集团，https://huggingface.co/FunAudioLLM/SenseVoiceSmall；ONNX 导出 k2-fsa / sherpa-onnx（Apache-2.0），https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17；assets/SenseVoice-LICENSE.txt |
 | 可选 CuPy | MIT，https://cupy.dev/ |
-| PyObjC（macOS 版，调用 Metal） | MIT，https://github.com/ronaldoussoren/pyobjc |
-| ExifTool 13.59 Perl 发行版（macOS 版） | 与 Perl 相同条款（Artistic / GPL），https://exiftool.org/；许可说明见随包 assets/exiftool/unix/README，由系统自带 Perl 运行 |
-| python-build-standalone CPython 3.12（macOS 版构建所用 Python） | PSF 及其组件自身许可，https://github.com/astral-sh/python-build-standalone |
 | PyInstaller 引导程序 | GPL-2.0 及引导程序例外条款，https://pyinstaller.org/ |
-| dmgbuild（仅生成 DMG 时使用，不随包分发） | MIT，https://github.com/dmgbuild/dmgbuild |
 
 构建时 tools/collect_licenses.py 从实际安装的依赖收集许可文本与校验清单，便携目录包含 `licenses/`。字体许可证在 `assets/OFL.txt`。测试用的 Sony ARW 样片来自 https://raw.pixls.us/，记录为 CC0，仅用于验证，未将大体积原始样片加入便携包。
 

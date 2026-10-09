@@ -44,7 +44,6 @@ def test_frozen_builds_include_shared_control_resources():
             Path(source).name == name and destination.replace('\\', '/') == 'ccraw/resources'
             for source, destination in collected
         )
-    for spec in ('CCRaw.spec', 'CCRaw-macOS.spec'):
-        assert "collect_data_files('ccraw', includes=['resources/*'])" in (ROOT / spec).read_text(
-            encoding='utf8'
-        )
+    assert "collect_data_files('ccraw', includes=['resources/*'])" in (
+        ROOT / 'CCRaw.spec'
+    ).read_text(encoding='utf8')
