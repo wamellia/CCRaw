@@ -5,6 +5,7 @@ CCRaw 的源码许可不替代依赖许可。便携包保留动态库，Qt / PyS
 | 组件 | 主要许可 / 来源 |
 |---|---|
 | Photo-Butler 提示词模板及预览图片 | ISC，https://github.com/Jokerealm/Photo-Butler；ccraw/resources/Photo-Butler-LICENSE.txt |
+| semi-utils 智能水印版式参考与相机品牌图片 | Apache-2.0，https://github.com/leslievan/semi-utils；ccraw/resources/Semi-Utils-LICENSE.txt；品牌图片经过裁边、白底转透明和缩放，版式及 Photo Engine 集成由 CCRaw 实现 |
 | Python | PSF，https://www.python.org/ |
 | nanobot-ai 0.3.5（可选 Agent 核心循环） | MIT，https://github.com/HKUDS/nanobot；依赖许可由构建工具从已安装包收集 |
 | Hugging Face tokenizers（可选本地 CLIP tokenizer） | Apache-2.0，https://github.com/huggingface/tokenizers |

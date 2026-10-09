@@ -34,6 +34,8 @@ def defaults():
         fields=list(LABELS),
         camera_logo='',
         lens_logo='',
+        layout='classic',
+        smart_brand='auto',
     )
 
 
@@ -50,6 +52,12 @@ def validate(data):
     if not isinstance(data, dict):
         raise ValueError('水印设置无效。')
     result = defaults()
+    from .smart_watermark import BRANDS, LAYOUTS
+
+    result['layout'] = data.get('layout', 'classic')
+    result['smart_brand'] = data.get('smart_brand', 'auto')
+    if result['layout'] not in LAYOUTS or result['smart_brand'] not in ('auto', *BRANDS):
+        raise ValueError('水印版式或品牌无效。')
     result['enabled'] = bool(data.get('enabled', False))
     result['preset'] = data.get('preset', 'gallery')
     if result['preset'] not in PRESETS:
@@ -98,6 +106,10 @@ def lines(settings, photo):
 
 
 def band(length, thickness, settings, photo):
+    if settings['layout'] == 'smart':
+        from .smart_watermark import band as smart_band
+
+        return smart_band(length, thickness, settings, photo)
     _, bg, fg = PRESETS[settings['preset']]
     strip = Image.new('RGB', (length, thickness), bg)
     draw = ImageDraw.Draw(strip)

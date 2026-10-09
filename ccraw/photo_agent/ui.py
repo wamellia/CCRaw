@@ -8,7 +8,7 @@ from pathlib import Path
 import threading
 import weakref
 
-from PySide6.QtCore import Qt, QThread, Signal, QTimer
+from PySide6.QtCore import Qt, QThread, Signal, QTimer, QSignalBlocker
 from PySide6.QtGui import QIcon, QAction, QFontDatabase
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -32,11 +32,12 @@ from PySide6.QtWidgets import (
 )
 
 from .. import resources, nl_edit, model, image_generation
+from ..ui.theme import AppearanceButton
 from . import analysis, editing, search
 from .models import LocalModels, install_models
 from .runtime import run_turn
-from .store import Project
 from .gallery import PhotoGallery, DETAIL_ROLE, thumbnail
+from .launcher import Launcher as Launcher
 
 ACTIVE = weakref.WeakValueDictionary()
 
@@ -79,86 +80,6 @@ def button(text, callback, *, primary=False):
     return widget
 
 
-class Launcher(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        ensure_font()
-        self.windows = []
-        self.setWindowTitle('CCRaw')
-        self.setWindowIcon(QIcon(str(resources.asset_path('ccraw.ico'))))
-        self.resize(860, 460)
-        self.setMinimumSize(720, 380)
-        root = QWidget()
-        layout = QVBoxLayout(root)
-        layout.setContentsMargins(40, 32, 40, 32)
-        title = QLabel('CCRaw')
-        title.setStyleSheet('font-size: 32px; font-weight: 600;')
-        layout.addWidget(title)
-        row = QHBoxLayout()
-        self.catalog_button = button('照片编辑', self.open_catalog)
-        self.agent_button = button('Photo Agent', self.new_agent, primary=True)
-        for card in (self.catalog_button, self.agent_button):
-            card.setMinimumHeight(150)
-            card.setStyleSheet(
-                'font-size: 24px; font-weight: 600; min-height:150px; max-height:180px;'
-            )
-            row.addWidget(card)
-        layout.addLayout(row, 1)
-        actions = QHBoxLayout()
-        actions.addWidget(QLabel('RAW · 调色 · 蒙版 · 裁切 · 导出'))
-        actions.addStretch()
-        actions.addWidget(button('打开 Agent 工程', self.open_agent))
-        layout.addLayout(actions)
-        self.setCentralWidget(root)
-
-    def retain(self, window):
-        window.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
-        self.windows.append(window)
-        window.destroyed.connect(
-            lambda: self.windows.remove(window) if window in self.windows else None
-        )
-        window.show()
-        return window
-
-    def open_catalog(self, path=None):
-        from ..app import MainWindow
-
-        window = self.retain(MainWindow())
-        if isinstance(path, (str, Path)):
-            QTimer.singleShot(0, lambda: window.open_path(str(path)))
-        return window
-
-    def new_agent(self):
-        path, _ = QFileDialog.getSaveFileName(
-            self, '新建 Agent 工程', '', 'CCRaw Agent (*.ccrawagent)'
-        )
-        if path:
-            self.load_agent(path, create=True)
-
-    def open_agent(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, '打开 Agent 工程', '', 'CCRaw Agent (*.ccrawagent)'
-        )
-        if path:
-            self.load_agent(path)
-
-    def load_agent(self, path, *, create=False):
-        key = str(Path(path).resolve())
-        if key in ACTIVE:
-            ACTIVE[key].show()
-            ACTIVE[key].raise_()
-            ACTIVE[key].activateWindow()
-            return ACTIVE[key]
-        try:
-            project = Project.create(path, Path(path).stem) if create else Project.open(path)
-            project.recover()
-            window = self.retain(AgentWindow(project))
-            ACTIVE[str(project.path)] = window
-            return window
-        except (ValueError, OSError) as error:
-            QMessageBox.warning(self, '工程', str(error))
-
-
 class AgentWindow(QMainWindow):
     def __init__(self, project):
         super().__init__()
@@ -195,6 +116,8 @@ class AgentWindow(QMainWindow):
             control = button(text, callback)
             top.addWidget(control)
             self.busy_controls.append(control)
+        self.appearance_button = AppearanceButton(self)
+        top.addWidget(self.appearance_button)
         layout.addLayout(top)
         splitter = QSplitter()
         splitter.setChildrenCollapsible(False)
@@ -249,7 +172,12 @@ class AgentWindow(QMainWindow):
         self.proposal_list = QListWidget()
         proposal_layout.addWidget(self.proposal_list)
         self.apply_button = button('查看并应用方案', self.apply_proposal, primary=True)
-        proposal_layout.addWidget(self.apply_button)
+        self.clear_proposals_button = button('清空当前方案', self.clear_proposals)
+        proposal_actions = QHBoxLayout()
+        proposal_actions.addWidget(self.apply_button, 1)
+        proposal_actions.addWidget(self.clear_proposals_button)
+        proposal_layout.addLayout(proposal_actions)
+        self.busy_controls.append(self.clear_proposals_button)
         self.tabs.addTab(proposal_panel, '编辑方案')
         self.derivative_list = QListWidget()
         self.derivative_list.itemDoubleClicked.connect(self.open_derivative)
@@ -294,6 +222,7 @@ class AgentWindow(QMainWindow):
         self.progress_bar.hide()
         layout.addWidget(self.progress_bar)
         self.setCentralWidget(root)
+        self.gallery.itemSelectionChanged.connect(self.refresh_proposals)
         self.refresh_gallery()
         self.refresh_records()
         self.refresh_chat()
@@ -535,6 +464,7 @@ class AgentWindow(QMainWindow):
 
     def refresh_gallery(self, result=None):
         selected = set(self.selected_ids())
+        blocker = QSignalBlocker(self.gallery)
         self.gallery.clear()
         records = (
             self.project.photos(200, self.offset)
@@ -574,6 +504,8 @@ class AgentWindow(QMainWindow):
         self.count_label.setText(
             f'{count} 张 · 已索引 {summary["indexed"]} · {self.offset + 1 if count else 0}–{min(count, self.offset + 200)}'
         )
+        blocker.unblock()
+        self.refresh_proposals()
 
     def refresh_chat(self):
         self.chat.clear()
@@ -617,11 +549,9 @@ class AgentWindow(QMainWindow):
         for index in range(self.gallery.count()):
             self.gallery.item(index).setSelected(True)
 
-    def refresh_records(self):
+    def refresh_proposals(self):
         self.proposal_list.clear()
-        for proposal in self.project.proposals():
-            if proposal['status'] != 'pending':
-                continue
+        for proposal in self.project.proposals(photo_ids=self.selected_ids(), pending_only=True):
             item = QListWidgetItem(
                 proposal['payload']['label']
                 + ' · '
@@ -632,6 +562,18 @@ class AgentWindow(QMainWindow):
         if self.proposal_list.count():
             self.proposal_list.setCurrentRow(0)
         self.apply_button.setEnabled(self.worker is None and self.proposal_list.count() > 0)
+        self.clear_proposals_button.setEnabled(
+            self.worker is None and self.proposal_list.count() > 0
+        )
+
+    def clear_proposals(self):
+        if self.worker is not None:
+            return
+        self.project.dismiss_proposals(self.selected_ids())
+        self.refresh_records()
+
+    def refresh_records(self):
+        self.refresh_proposals()
         self.derivative_list.clear()
         for derivative in self.project.derivatives():
             item = QListWidgetItem(Path(derivative['path']).name)

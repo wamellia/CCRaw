@@ -1,8 +1,7 @@
 """Browseable menus, watermark preferences and exclusive AI task scheduling."""
 
-from PySide6.QtWidgets import QDialog, QMessageBox, QApplication
-from PySide6.QtGui import QActionGroup
-from PySide6.QtCore import QSettings
+from PySide6.QtWidgets import QDialog, QMessageBox
+from .ui.theme import AppearanceMenu, set_appearance
 from .ai_dialog import EnhancementDialog
 from .scheduler import Activity as A
 from .watermark_dialog import WatermarkDialog
@@ -30,15 +29,9 @@ class WorkflowMixin:
         self.sidebar_action.setChecked(self.sidebar_button.isChecked())
         self.sidebar_action.toggled.connect(self.sidebar_button.setChecked)
         self.sidebar_button.toggled.connect(self.sidebar_action.setChecked)
-        appearance = view.addMenu('外观')
-        self.appearance_group = QActionGroup(self)
-        self.appearance_group.setExclusive(True)
-        for title, mode in [('浅色', 'light'), ('深色', 'dark')]:
-            action = appearance.addAction(title)
-            action.setCheckable(True)
-            action.setChecked(QSettings('CCRaw', 'CCRaw').value('appearance', 'light') == mode)
-            self.appearance_group.addAction(action)
-            action.triggered.connect(lambda checked=False, m=mode: self.set_appearance(m))
+        self.appearance_menu = AppearanceMenu(self)
+        self.appearance_group = self.appearance_menu.group
+        view.addMenu(self.appearance_menu)
         for i in range(self.tabs.count()):
             view.addAction(
                 self.tabs.tabText(i),
@@ -55,10 +48,7 @@ class WorkflowMixin:
         )
 
     def set_appearance(self, mode):
-        from .ui.theme import apply_theme
-
-        QSettings('CCRaw', 'CCRaw').setValue('appearance', mode)
-        apply_theme(QApplication.instance(), mode)
+        set_appearance(mode)
 
     def configure_watermark(self):
         if self.work.busy(A.AI, A.EXPORTING, A.LOADING):

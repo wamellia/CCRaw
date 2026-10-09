@@ -45,7 +45,7 @@ def propose_local(project, photo_id, patch=None):
             raise ValueError('编辑参数必须是对象。')
         choices = [('自定义调整', patch)]
     base = project.preferences().get('recipe:' + photo_id, model.recipe())
-    result = []
+    payloads = []
     for label, change in choices[:3]:
         plan = nl_edit.plan(model.validate(base), change)
         if plan.regions:
@@ -59,10 +59,8 @@ def propose_local(project, photo_id, patch=None):
             upload='无',
             cost='本地处理',
         )
-        proposal_id = project.proposal(photo_id, 'local', payload)
-        result.append(
-            dict(id=proposal_id, photo_id=photo_id, kind='local', payload=payload, status='pending')
-        )
+        payloads.append(payload)
+    result = project.replace_proposals(photo_id, 'local', payloads)
     project.event('edit.proposed', {'photo_id': photo_id, 'count': len(result), 'kind': 'local'})
     return result
 

@@ -106,8 +106,10 @@ class PhotoGallery(QListWidget):
         return result
 
     def reflow(self):
-        # Keep Qt's item-layout inset and integer rounding inside the viewport.
-        available = max(1, self.viewport().width() - 8)
+        # Reserve a stable gutter even while the as-needed scrollbar is hidden.
+        # Using viewport.width() here makes row height toggle scrollbar visibility.
+        gutter = self.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent, None, self)
+        available = max(1, self.maximumViewportSize().width() - gutter - 8)
         columns = max(1, available // 220)
         width = available // columns
         size = QSize(width, width + 2 * self.fontMetrics().height() + 12)

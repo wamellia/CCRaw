@@ -42,6 +42,35 @@ def test_events_preferences_and_history_are_separate_and_replay_is_read_only(tmp
     assert not list(project.root.glob('derived/*'))
 
 
+def test_replacing_and_clearing_recommendations_preserves_executing_and_completed(tmp_path):
+    source = tmp_path / 'photo.png'
+    source.write_bytes(b'photo')
+    project = Project.create(tmp_path / 'editing.ccrawagent', '项目')
+    photo_id = project.import_paths([source])[0]
+    old = project.replace_proposals(photo_id, 'local', [{}, {}, {}])
+    project.claim_proposal(old[0]['id'])
+    project.proposal_status(old[1]['id'], 'done')
+    project.replace_proposals(photo_id, 'local', [{'label': 'new'}])
+    project.dismiss_proposals([photo_id])
+    records = {p['id']: p for p in project.proposals()}
+    assert records[old[0]['id']]['status'] == 'executing'
+    assert records[old[1]['id']]['status'] == 'done'
+    assert records[old[2]['id']]['status'] == 'superseded'
+    assert not project.proposals(photo_ids=[photo_id], pending_only=True)
+
+
+def test_invalid_batch_does_not_discard_previous_recommendations(tmp_path):
+    source = tmp_path / 'photo.png'
+    source.write_bytes(b'photo')
+    project = Project.create(tmp_path / 'editing.ccrawagent', '项目')
+    photo_id = project.import_paths([source])[0]
+    project.replace_proposals(photo_id, 'local', [{'label': 'old'}])
+    previous = project.proposals()
+    with pytest.raises((TypeError, ValueError)):
+        project.replace_proposals(photo_id, 'local', [{'label': 'new'}, {'invalid': object()}])
+    assert project.proposals() == previous
+
+
 def test_output_path_and_oversized_context_are_bounded(tmp_path):
     project = Project.create(tmp_path / 'trip.ccrawagent', '旅行')
     with pytest.raises(ValueError):

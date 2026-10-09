@@ -7,6 +7,8 @@ from PySide6.QtTest import QTest
 
 from ccraw.photo_agent.store import Project
 from ccraw.photo_agent.ui import AgentWindow
+from ccraw.photo_agent.gallery import PhotoGallery
+from PySide6.QtWidgets import QListWidgetItem
 from ccraw.ui.theme import apply_theme, tokens
 
 
@@ -130,3 +132,31 @@ def test_gallery_reflows_without_clipping_and_preserves_selection(app, tmp_path)
         assert window.gallery.item(2).data(Qt.ItemDataRole.UserRole) in selected
     finally:
         window.close()
+
+
+def test_four_photos_settle_at_scrollbar_threshold(app):
+    palette, stylesheet, font = app.palette(), app.styleSheet(), app.font()
+    apply_theme(app, 'dark')
+    gallery = PhotoGallery()
+    for index in range(4):
+        gallery.addItem(QListWidgetItem(str(index)))
+    changes = []
+    gallery.layout_timer.timeout.connect(lambda: changes.append(gallery.gridSize()))
+    try:
+        gallery.resize(640, 698)
+        gallery.show()
+        QTest.qWait(120)
+        settled = len(changes)
+        QTest.qWait(100)
+        assert len(changes) == settled, 'Scrollbar visibility must not keep restarting grid layout'
+        gallery.resize(640, 400)
+        QTest.qWait(80)
+        assert gallery.verticalScrollBar().maximum() > 0
+        gallery.resize(640, 1000)
+        QTest.qWait(80)
+        assert gallery.verticalScrollBar().maximum() == 0
+    finally:
+        gallery.close()
+        app.setPalette(palette)
+        app.setStyleSheet(stylesheet)
+        app.setFont(font)

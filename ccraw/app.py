@@ -3,7 +3,7 @@ from . import resources
 import copy
 import sys
 from pathlib import Path
-from PySide6.QtCore import QThreadPool, QTimer, Signal, QSettings
+from PySide6.QtCore import QThreadPool, QTimer, Signal
 from PySide6.QtGui import QFontDatabase, QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget
 from . import engine, model
@@ -19,7 +19,7 @@ from .nl_panel import NaturalLanguageMixin
 from . import performance
 from . import live_preview, native_kernels
 
-from .ui.theme import STYLE as STYLE, apply_theme
+from .ui.theme import STYLE as STYLE, apply_theme, saved_appearance
 from .ui.components import ComputeStatusBar
 from .ui.panels import PanelsMixin
 from .ui.preview import PreviewMixin
@@ -129,7 +129,7 @@ def main():
     app.aboutToQuit.connect(ai_worker.shutdown)
     app.setApplicationName('CCRaw')
     app.setStyle('Fusion')
-    apply_theme(app, QSettings('CCRaw', 'CCRaw').value('appearance', 'light'))
+    apply_theme(app, saved_appearance())
     from .photo_agent.ui import Launcher
 
     window = Launcher()

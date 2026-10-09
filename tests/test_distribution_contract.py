@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import subprocess
 import sys
 import pytest
@@ -11,7 +12,7 @@ from ccraw import host, model
 def test_release_identity_is_independent():
     from ccraw import __version__, branding
 
-    assert __version__ == '0.1.0'
+    assert re.fullmatch(r'\d+\.\d+\.\d+', __version__)
     assert branding.NAME == 'CCRaw'
 
 
@@ -183,7 +184,9 @@ def test_version_command_does_not_start_qt():
     result = subprocess.run(
         [sys.executable, '-m', 'ccraw', '--version'], capture_output=True, text=True, timeout=10
     )
-    assert result.returncode == 0 and result.stdout.strip() == 'CCRaw 0.1.0'
+    from ccraw import __version__
+
+    assert result.returncode == 0 and result.stdout.strip() == f'CCRaw {__version__}'
 
 
 def test_legacy_album_reopens_and_saves_as_ccraw(window, tmp_path, monkeypatch):

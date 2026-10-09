@@ -26,7 +26,7 @@ from ..watermark_dialog import WatermarkEditor
 
 from .components import note, heading
 from .icons import set_icon
-from .theme import style_swatch
+from .theme import AppearanceButton, style_swatch
 
 
 class PanelsMixin:
@@ -68,6 +68,8 @@ class PanelsMixin:
         set_icon(self.redo_button, 'redo')
         bar.addWidget(self.redo_button)
         bar.addStretch()
+        self.appearance_button = AppearanceButton(self)
+        bar.addWidget(self.appearance_button)
         self.open_button = self.button('打开', self.open_file)
         set_icon(self.open_button, 'open')
         bar.addWidget(self.open_button)

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 from . import watermark, engine
 from .widgets import qimage
+from .smart_watermark import BRANDS, LAYOUTS
 
 
 class WatermarkEditor(QWidget):
@@ -55,6 +56,24 @@ class WatermarkEditor(QWidget):
         self.enabled = QCheckBox('导出时添加水印边框')
         self.enabled.setChecked(self.settings['enabled'])
         form.addRow(self.enabled)
+        self.smart_button = QPushButton('智能水印')
+        self.smart_button.setObjectName('primary')
+        self.smart_button.setMinimumHeight(36)
+        self.smart_button.clicked.connect(self.enable_smart)
+        form.addRow(self.smart_button)
+        self.watermark_layout = QComboBox()
+        for key, label in LAYOUTS.items():
+            self.watermark_layout.addItem(label, key)
+        self.watermark_layout.setCurrentIndex(
+            self.watermark_layout.findData(self.settings['layout'])
+        )
+        form.addRow('水印版式', self.watermark_layout)
+        self.brand = QComboBox()
+        self.brand.addItem('自动识别', 'auto')
+        for key, label in BRANDS.items():
+            self.brand.addItem(label, key)
+        self.brand.setCurrentIndex(self.brand.findData(self.settings['smart_brand']))
+        form.addRow('相机品牌', self.brand)
         self.preset = QComboBox()
         for key, (title, *_) in watermark.PRESETS.items():
             self.preset.addItem(title, key)
@@ -96,7 +115,7 @@ class WatermarkEditor(QWidget):
             row.addWidget(clear)
             form.addRow(title, row)
         helptext = QLabel(
-            '内置通用字体品牌名称；图形标志请导入自己有权使用的 PNG。\n缺失 EXIF 会显示“未记录”，不采用文件修改时间。\n水印仅在最终导出时添加，AI 副本保留无边框图像。'
+            '智能水印自动匹配相机品牌标志和拍摄参数，缺失参数自动省略。\n普通边框的缺失参数显示“未记录”。导入的 PNG 优先于内置标志。\n水印在最终导出时添加，AI 副本保留无边框图像。'
         )
         helptext.setWordWrap(True)
         self.preset.setToolTip(helptext.text())
@@ -108,6 +127,8 @@ class WatermarkEditor(QWidget):
         for c in [self.enabled, *self.sides.values(), *self.fields.values()]:
             c.toggled.connect(self.update_preview)
         self.preset.currentIndexChanged.connect(self.update_preview)
+        self.watermark_layout.currentIndexChanged.connect(self.update_preview)
+        self.brand.currentIndexChanged.connect(self.update_preview)
         self.size.valueChanged.connect(self.update_preview)
         active = owner.source is not None
         self.form_box.setEnabled(active)
@@ -122,7 +143,22 @@ class WatermarkEditor(QWidget):
             sides=[k for k, c in self.sides.items() if c.isChecked()],
             size=self.size.value(),
             fields=[k for k, c in self.fields.items() if c.isChecked()],
+            layout=self.watermark_layout.currentData(),
+            smart_brand=self.brand.currentData(),
         )
+
+    def enable_smart(self):
+        settings = self.values()
+        settings.update(
+            enabled=True,
+            layout='smart',
+            smart_brand='auto',
+            sides=['bottom'],
+            fields=list(watermark.LABELS),
+        )
+        self.set_settings(settings)
+        self.changed.emit(copy.deepcopy(settings))
+        self.update_preview()
 
     def update_preview(self, *_):
         if self.refreshing:
@@ -207,6 +243,10 @@ class WatermarkEditor(QWidget):
         self.refreshing = True
         self.settings = copy.deepcopy(settings)
         self.enabled.setChecked(settings['enabled'])
+        self.watermark_layout.setCurrentIndex(
+            self.watermark_layout.findData(settings.get('layout', 'classic'))
+        )
+        self.brand.setCurrentIndex(self.brand.findData(settings.get('smart_brand', 'auto')))
         self.preset.setCurrentIndex(list(watermark.PRESETS).index(settings['preset']))
         self.size.setValue(round(settings['size']))
         for key, control in self.sides.items():

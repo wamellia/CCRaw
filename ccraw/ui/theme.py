@@ -2,8 +2,9 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from PySide6.QtGui import QColor, QFontDatabase, QPalette
-from PySide6.QtWidgets import QApplication
+from PySide6.QtCore import QSettings
+from PySide6.QtGui import QActionGroup, QColor, QFontDatabase, QPalette
+from PySide6.QtWidgets import QApplication, QMenu, QPushButton
 
 
 @dataclass(frozen=True)
@@ -68,6 +69,24 @@ def tokens(widget=None):
 
 def color(role, widget=None):
     return QColor(getattr(tokens(widget), role))
+
+
+def appearance_settings():
+    return QSettings('CCRaw', 'CCRaw')
+
+
+def saved_appearance():
+    mode = appearance_settings().value('appearance', 'light')
+    return mode if mode in ('light', 'dark') else 'light'
+
+
+def set_appearance(mode):
+    if mode not in ('light', 'dark'):
+        raise ValueError('外观模式无效。')
+    settings = appearance_settings()
+    settings.setValue('appearance', mode)
+    settings.sync()
+    apply_theme(QApplication.instance(), mode)
 
 
 def stylesheet(t):
@@ -204,6 +223,8 @@ def apply_theme(app, mode='light'):
     font.setPixelSize(13)
     app.setFont(font)
     for widget in app.allWidgets():
+        if isinstance(widget, (AppearanceMenu, AppearanceButton)):
+            widget.sync(mode)
         if widget.property('symbol'):
             from .icons import set_icon
 
@@ -212,3 +233,40 @@ def apply_theme(app, mode='light'):
             style_swatch(widget, widget.property('swatchColor'), t)
         widget.update()
     return t
+
+
+class AppearanceMenu(QMenu):
+    def __init__(self, parent):
+        super().__init__('外观', parent)
+        self.group = QActionGroup(self)
+        self.group.setExclusive(True)
+        self.mode_actions = {}
+        for title, mode in [('浅色', 'light'), ('深色', 'dark')]:
+            action = self.addAction(title)
+            action.setCheckable(True)
+            action.setData(mode)
+            self.group.addAction(action)
+            action.triggered.connect(lambda checked=False, value=mode: set_appearance(value))
+            self.mode_actions[mode] = action
+        self.sync('dark' if tokens() == DARK else 'light')
+
+    def sync(self, mode):
+        self.mode_actions['dark' if mode == 'dark' else 'light'].setChecked(True)
+
+
+class AppearanceButton(QPushButton):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setMinimumHeight(36)
+        self.setMinimumWidth(134)
+        self.setAccessibleName('外观')
+        self.setToolTip('切换浅色或深色外观')
+        self.appearance_menu = AppearanceMenu(self)
+        self.setMenu(self.appearance_menu)
+        from .icons import set_icon
+
+        set_icon(self, 'light')
+        self.sync('dark' if tokens() == DARK else 'light')
+
+    def sync(self, mode):
+        self.setText('外观：深色' if mode == 'dark' else '外观：浅色')

@@ -43,6 +43,28 @@ def test_changed_source_invalidates_local_proposal(tmp_path):
     assert project.derivatives() == []
 
 
+def test_recommending_again_replaces_pending_batch_without_erasing_history(tmp_path):
+    project, photo_id, _ = setup_photo(tmp_path)
+    first = propose_local(project, photo_id)
+    second = propose_local(project, photo_id)
+    records = project.proposals()
+    assert len([p for p in records if p['status'] == 'pending']) == 3
+    assert {p['id'] for p in records if p['status'] == 'pending'} == {p['id'] for p in second}
+    assert all(p['status'] == 'superseded' for p in records if p['id'] in {q['id'] for q in first})
+    with pytest.raises(ValueError):
+        project.claim_proposal(first[0]['id'])
+
+
+def test_invalid_replacement_keeps_previous_recommendations(tmp_path):
+    project, photo_id, _ = setup_photo(tmp_path)
+    first = propose_local(project, photo_id)
+    with pytest.raises(ValueError):
+        propose_local(project, photo_id, [])
+    assert {p['id'] for p in project.proposals() if p['status'] == 'pending'} == {
+        p['id'] for p in first
+    }
+
+
 def test_external_execution_requires_exact_disclosure_and_is_single_use(tmp_path):
     project, photo_id, source = setup_photo(tmp_path)
     settings = dict(

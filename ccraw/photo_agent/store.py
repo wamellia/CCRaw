@@ -279,10 +279,61 @@ class Project:
             )
         return proposal_id
 
-    def proposals(self, limit=100):
+    def replace_proposals(self, photo_id, kind, payloads):
+        self.photo(photo_id)
+        if not 1 <= len(payloads) <= 3:
+            raise ValueError('一次最多创建三种编辑方案。')
+        records = [
+            dict(
+                id=identifier(),
+                photo_id=photo_id,
+                kind=kind,
+                payload=payload,
+                created=time.time(),
+                status='pending',
+            )
+            for payload in payloads
+        ]
+        values = [(p['id'], photo_id, kind, encoded(p['payload']), p['created']) for p in records]
+        with self.connect() as db:
+            db.execute(
+                "UPDATE proposals SET status='superseded' WHERE photo_id=? AND kind=? AND status='pending'",
+                (photo_id, kind),
+            )
+            db.executemany(
+                'INSERT INTO proposals(id,photo_id,kind,payload,created) VALUES(?,?,?,?,?)', values
+            )
+        return records
+
+    def dismiss_proposals(self, photo_ids):
+        ids = list(dict.fromkeys(photo_ids))
+        if not ids:
+            return
+        with self.connect() as db:
+            cursor = db.execute(
+                "UPDATE proposals SET status='dismissed' WHERE status='pending' AND photo_id IN ("
+                + ','.join('?' for _ in ids)
+                + ')',
+                ids,
+            )
+            count = cursor.rowcount
+        self.event('edit.dismissed', {'photo_ids': ids, 'count': count})
+
+    def proposals(self, limit=100, *, photo_ids=None, pending_only=False):
+        conditions, parameters = [], []
+        if photo_ids is not None:
+            ids = list(dict.fromkeys(photo_ids))
+            if not ids:
+                return []
+            conditions.append('photo_id IN (' + ','.join('?' for _ in ids) + ')')
+            parameters.extend(ids)
+        if pending_only:
+            conditions.append("status='pending'")
+        where = ' WHERE ' + ' AND '.join(conditions) if conditions else ''
         with self.connect() as db:
             rows = db.execute(
-                'SELECT * FROM proposals ORDER BY created DESC LIMIT ?', (min(100, limit),)
+                'SELECT * FROM proposals' + where + ' ORDER BY created DESC LIMIT ?',
+                [*parameters, min(100, limit)],
             ).fetchall()
         return [dict(r, payload=json.loads(r['payload'])) for r in rows]
 
