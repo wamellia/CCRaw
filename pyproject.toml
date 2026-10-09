@@ -17,6 +17,7 @@ classifiers = ['Topic :: Multimedia :: Graphics :: Editors', 'Operating System :
 ccraw = 'ccraw.bootstrap:main'
 
 [project.optional-dependencies]
+agent = ['nanobot-ai==0.3.5', 'tokenizers>=0.21,<1']
 dev = ['pytest>=8,<10', 'ruff>=0.12,<1', 'build>=1,<2', 'pyinstaller>=6.12,<7']
 
 [tool.setuptools.dynamic]

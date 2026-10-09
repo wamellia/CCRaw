@@ -21,6 +21,7 @@ shiboken6==6.11.2
 tifffile==2026.9.20
 onnxruntime==1.30.0
 flatbuffers==25.12.19
+tzdata==2026.5
 numexpr==2.14.2
 numba==0.68.0
 llvmlite==0.50.0

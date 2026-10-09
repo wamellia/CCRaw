@@ -6,6 +6,11 @@ CCRaw 的源码许可不替代依赖许可。便携包保留动态库，Qt / PyS
 |---|---|
 | Photo-Butler 提示词模板及预览图片 | ISC，https://github.com/Jokerealm/Photo-Butler；ccraw/resources/Photo-Butler-LICENSE.txt |
 | Python | PSF，https://www.python.org/ |
+| nanobot-ai 0.3.5（可选 Agent 核心循环） | MIT，https://github.com/HKUDS/nanobot；依赖许可由构建工具从已安装包收集 |
+| Hugging Face tokenizers（可选本地 CLIP tokenizer） | Apache-2.0，https://github.com/huggingface/tokenizers |
+| OpenAI CLIP / Xenova 量化 ONNX | MIT，https://github.com/openai/CLIP；https://huggingface.co/Xenova/clip-vit-base-patch32；ccraw/resources/CLIP-LICENSE.txt |
+| OpenCV Zoo YuNet 人脸检测 | MIT，https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet；ccraw/resources/YuNet-LICENSE.txt |
+| OpenCV Zoo SFace 匿名人脸特征 | Apache-2.0，https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface；ccraw/resources/SFace-LICENSE.txt |
 | NumExpr / Numba / llvmlite | MIT / BSD-2-Clause / BSD-3-Clause and LLVM terms; see collected license texts |
 | NumPy | BSD，https://numpy.org/ |
 | OpenCV | Apache-2.0 等，https://opencv.org/ |

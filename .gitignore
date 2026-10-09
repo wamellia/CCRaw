@@ -54,3 +54,7 @@ assets/models/sensevoice/
 licenses/
 release-assets/
 *.egg-info/
+*.ccrawagent
+*.ccrawagent-data/
+*.sqlite3-wal
+*.sqlite3-shm

@@ -14,7 +14,8 @@ if (-not (Test-Path -LiteralPath $python -PathType Leaf)) {
     if ($LASTEXITCODE -ne 0) { throw 'Python 3.12 is required.' }
 }
 $env:PYTHONUTF8 = '1'
-if (-not $PythonPath) { Run @('-m','pip','install','-r','requirements-lock.txt') }
+if (-not $PythonPath) { Run @('-m','pip','install','-r','requirements-agent-lock.txt') }
+Run @('-c',"import nanobot, tokenizers")
 Run @('tools/check_dependencies.py')
 Run @('-m','pip','check')
 if ($AssetArchive) { Run @('tools/fetch_assets.py','--archive',$AssetArchive) }

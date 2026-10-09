@@ -7,3 +7,4 @@ rawpy>=0.25,<0.28
 PySide6>=6.8,<7
 tifffile>=2025.1
 onnxruntime>=1.21,<2
+tzdata>=2025,<2028

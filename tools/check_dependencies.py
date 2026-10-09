@@ -26,6 +26,8 @@ def check():
     if len(runtimes) != 1:
         raise RuntimeError('Install exactly one ONNX Runtime distribution: ' + str(runtimes))
     expected = pins(ROOT / 'requirements-lock.txt')
+    if 'nanobot-ai' in installed:
+        expected.update(pins(ROOT / 'requirements-agent-lock.txt'))
     if runtimes[0] != 'onnxruntime':
         expected.pop('onnxruntime')
         variant = (

@@ -57,7 +57,7 @@ def main(argv=None):
         return 0
     if '--help' in sys.argv[1:] or '-h' in sys.argv[1:]:
         print(
-            'CCRaw: ccraw [photo.ccraw | image | album.ccrawalbum ...]\nOptions: --version, --help'
+            'CCRaw: ccraw [photo.ccraw | image | album.ccrawalbum | project.ccrawagent ...]\nOptions: --version, --help'
         )
         return 0
     if sys.platform != 'win32':
@@ -69,7 +69,7 @@ def main(argv=None):
     multiprocessing.freeze_support()
     if len(sys.argv) >= 3 and (
         sys.argv[1] in ('--merge-test', '--workflow-test', '--release-test')
-        or (len(sys.argv) == 4 and sys.argv[1] == '--smoke-test')
+        or (len(sys.argv) == 4 and sys.argv[1] in ('--smoke-test', '--agent-smoke-test'))
     ):
         # Windowed PyInstaller builds have no Python stderr even when the process
         # handles are redirected. Persist diagnostic failures, including native
@@ -77,7 +77,9 @@ def main(argv=None):
         from pathlib import Path
         import faulthandler, traceback
 
-        folder = Path(sys.argv[3] if sys.argv[1] == '--smoke-test' else sys.argv[2])
+        folder = Path(
+            sys.argv[3] if sys.argv[1] in ('--smoke-test', '--agent-smoke-test') else sys.argv[2]
+        )
         folder.mkdir(parents=True, exist_ok=True)
         log = open(folder / 'diagnostic-runtime.log', 'w', encoding='utf8', buffering=1)
         sys.stdout = sys.stderr = log
@@ -97,6 +99,10 @@ def main(argv=None):
         from ccraw.release_diagnostics import run
 
         raise SystemExit(run(sys.argv[2], sys.argv[3:]))
+    if len(sys.argv) == 4 and sys.argv[1] == '--agent-smoke-test':
+        from ccraw.photo_agent.diagnostics import run
+
+        raise SystemExit(run(sys.argv[2], sys.argv[3]))
     if len(sys.argv) == 4 and sys.argv[1] == '--smoke-test':
         from ccraw.diagnostics import run
 

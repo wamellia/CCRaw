@@ -130,8 +130,14 @@ def main():
     app.setApplicationName('CCRaw')
     app.setStyle('Fusion')
     apply_theme(app, QSettings('CCRaw', 'CCRaw').value('appearance', 'light'))
-    window = MainWindow()
+    from .photo_agent.ui import Launcher
+
+    window = Launcher()
     window.show()
     if len(sys.argv) > 1 and Path(sys.argv[1]).is_file():
-        QTimer.singleShot(100, lambda: window.open_path(sys.argv[1]))
+        path = sys.argv[1]
+        if Path(path).suffix.lower() == '.ccrawagent':
+            QTimer.singleShot(100, lambda: window.load_agent(path))
+        else:
+            QTimer.singleShot(100, lambda: window.open_catalog(path))
     return app.exec()
