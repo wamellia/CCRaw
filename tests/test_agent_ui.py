@@ -81,7 +81,9 @@ def test_existing_editor_saves_recipe_back_to_agent_project(app, tmp_path):
             and not editor.jobs
             and not editor.render_running
             and not editor.timer.isActive()
-        )
+        ),
+        # A freshly extracted source tree compiles native preview kernels once.
+        timeout=45,
     )
     editor.edits['adjustments']['exposure'] = 0.25
     next(

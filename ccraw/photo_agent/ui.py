@@ -8,7 +8,7 @@ from pathlib import Path
 import threading
 import weakref
 
-from PySide6.QtCore import Qt, QSize, QThread, Signal, QTimer
+from PySide6.QtCore import Qt, QThread, Signal, QTimer
 from PySide6.QtGui import QIcon, QAction, QFontDatabase
 from PySide6.QtWidgets import (
     QMainWindow,
@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QListWidget,
     QListWidgetItem,
-    QAbstractItemView,
     QSplitter,
     QTabWidget,
     QTextBrowser,
@@ -37,6 +36,7 @@ from . import analysis, editing, search
 from .models import LocalModels, install_models
 from .runtime import run_turn
 from .store import Project
+from .gallery import PhotoGallery, DETAIL_ROLE, thumbnail
 
 ACTIVE = weakref.WeakValueDictionary()
 
@@ -197,9 +197,18 @@ class AgentWindow(QMainWindow):
             self.busy_controls.append(control)
         layout.addLayout(top)
         splitter = QSplitter()
+        splitter.setChildrenCollapsible(False)
+        splitter.setHandleWidth(6)
         left = QWidget()
+        left.setMinimumWidth(520)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 8, 0)
+        self.photo_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.photo_splitter.setChildrenCollapsible(False)
+        self.photo_splitter.setHandleWidth(6)
+        photo_panel = QWidget()
+        photo_layout = QVBoxLayout(photo_panel)
+        photo_layout.setContentsMargins(0, 0, 0, 0)
         finder = QHBoxLayout()
         self.search_input = QLineEdit()
         self.search_input.setMaxLength(1000)
@@ -210,23 +219,17 @@ class AgentWindow(QMainWindow):
         finder.addWidget(find)
         self.busy_controls.append(find)
         finder.addWidget(button('全部', self.show_all))
-        left_layout.addLayout(finder)
-        self.gallery = QListWidget()
-        self.gallery.setViewMode(QListWidget.ViewMode.IconMode)
-        self.gallery.setResizeMode(QListWidget.ResizeMode.Adjust)
-        self.gallery.setMovement(QListWidget.Movement.Static)
-        self.gallery.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.gallery.setIconSize(QSize(180, 126))
-        self.gallery.setGridSize(QSize(210, 168))
-        self.gallery.setSpacing(4)
+        photo_layout.addLayout(finder)
+        self.gallery = PhotoGallery()
+        self.gallery.setMinimumHeight(160)
         self.gallery.itemDoubleClicked.connect(lambda _: self.open_editor())
-        left_layout.addWidget(self.gallery, 1)
+        photo_layout.addWidget(self.gallery, 1)
         pages = QHBoxLayout()
         pages.addWidget(button('上一页', lambda: self.page(-1)))
         self.count_label = QLabel()
         pages.addWidget(self.count_label, 1)
         pages.addWidget(button('下一页', lambda: self.page(1)))
-        left_layout.addLayout(pages)
+        photo_layout.addLayout(pages)
         photo_actions = QHBoxLayout()
         self.editor_button = button('照片编辑', self.open_editor)
         photo_actions.addWidget(self.editor_button)
@@ -235,7 +238,8 @@ class AgentWindow(QMainWindow):
         recommend = button('推荐修图', self.recommend)
         photo_actions.addWidget(recommend)
         self.busy_controls.extend((annotate, recommend, self.editor_button))
-        left_layout.addLayout(photo_actions)
+        photo_layout.addLayout(photo_actions)
+        self.photo_splitter.addWidget(photo_panel)
         self.tabs = QTabWidget()
         self.suggestion_list = QListWidget()
         self.suggestion_list.itemClicked.connect(self.select_group)
@@ -252,8 +256,12 @@ class AgentWindow(QMainWindow):
         self.tabs.addTab(self.derivative_list, '派生版本')
         self.trace = QTextBrowser()
         self.tabs.addTab(self.trace, '执行记录')
-        self.tabs.setMaximumHeight(270)
-        left_layout.addWidget(self.tabs)
+        self.tabs.setMinimumHeight(140)
+        self.photo_splitter.addWidget(self.tabs)
+        self.photo_splitter.setSizes([620, 210])
+        self.photo_splitter.setStretchFactor(0, 3)
+        self.photo_splitter.setStretchFactor(1, 1)
+        left_layout.addWidget(self.photo_splitter)
         splitter.addWidget(left)
         right = QWidget()
         right.setMinimumWidth(340)
@@ -278,6 +286,8 @@ class AgentWindow(QMainWindow):
         right_layout.addLayout(send_row)
         splitter.addWidget(right)
         splitter.setSizes([920, 420])
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 1)
         layout.addWidget(splitter, 1)
         self.progress_bar = QProgressBar()
         self.progress_bar.setMaximumHeight(12)
@@ -536,8 +546,11 @@ class AgentWindow(QMainWindow):
         evidence = self.evidence if self.result_ids is not None else {}
         for photo in records:
             facts = photo['facts']
-            item = QListWidgetItem(Path(photo['path']).name[:28])
+            item = QListWidgetItem(Path(photo['path']).name)
             item.setData(Qt.ItemDataRole.UserRole, photo['id'])
+            width, height = facts.get('width'), facts.get('height')
+            detail = f'{width} × {height}' if width and height else '待扫描'
+            item.setData(DETAIL_ROLE, detail)
             item.setToolTip(
                 '\n'.join(
                     [
@@ -553,7 +566,7 @@ class AgentWindow(QMainWindow):
                 preview.is_file()
                 and preview.resolve().parent == (self.project.root / 'previews').resolve()
             ):
-                item.setIcon(QIcon(str(preview)))
+                item.setData(Qt.ItemDataRole.DecorationRole, thumbnail(preview))
             self.gallery.addItem(item)
             item.setSelected(photo['id'] in selected)
         summary = self.project.summary()
