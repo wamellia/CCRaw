@@ -1,0 +1,105 @@
+"""Package the verified Windows onedir build as a portable ZIP."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+import zipfile
+from pathlib import Path
+import onnxruntime
+
+
+PROJECT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT))
+from ccraw import __version__  # noqa: E402
+
+SOURCE = PROJECT / 'dist' / 'CCRaw'
+PACKAGES = PROJECT / '.publish' / ('v' + __version__.replace('.', '')) / 'packages'
+OUTPUT = PACKAGES / f'CCRaw-{__version__}-Windows.zip'
+
+
+def write_checksums():
+    """SHA256SUMS.txt for the portable ZIP and installer, as published on Releases."""
+    lines = []
+    for path in sorted(PACKAGES.glob(f'CCRaw-{__version__}-*')):
+        if path.suffix.lower() in ('.zip', '.exe'):
+            with path.open('rb') as stream:
+                lines.append(f'{hashlib.file_digest(stream, "sha256").hexdigest()}  {path.name}')
+    (PACKAGES / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    print('\n'.join(lines))
+
+
+def main():
+    if not (SOURCE / 'CCRaw.exe').is_file():
+        raise SystemExit('Missing frozen editor executable.')
+    files = sorted(path for path in SOURCE.rglob('*') if path.is_file())
+    names = {path.name.lower() for path in files}
+    required = {
+        'ccraw.ico',
+        'notosanssc.ttf',
+        'exiftool.exe',
+        'realesrgan-x4plus.onnx',
+        'realesr-general-x4v3.onnx',
+        'nafnet-sidd.onnx',
+        'drunet-color.onnx',
+        'ffdnet-color.onnx',
+        'skyseg.onnx',
+        'person-deeplab.onnx',
+        'u2netp.onnx',
+        'midas-small.onnx',
+    }
+    missing = required - names
+    if missing:
+        raise SystemExit('Frozen app is missing runtime resources: ' + ', '.join(sorted(missing)))
+    from tools.fetch_assets import verify
+
+    runtime = SOURCE / '_internal'
+    manifest = json.loads((runtime / 'assets/runtime-assets.json').read_text(encoding='utf-8'))
+    invalid = verify(runtime, manifest)
+    if invalid:
+        raise SystemExit('Frozen resource verification failed: ' + ', '.join(invalid))
+    for name in ('LICENSE', 'NOTICE', 'THIRD_PARTY.md', 'licenses/manifest.json'):
+        if not (runtime / name).is_file():
+            raise SystemExit('Missing distribution license: ' + name)
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    if OUTPUT.exists():
+        raise SystemExit(f'Preserving existing package: {OUTPUT}')
+    temporary = OUTPUT.with_suffix('.zip.tmp')
+    if temporary.exists():
+        raise SystemExit(
+            f'Remove the interrupted temporary archive after inspecting it: {temporary}'
+        )
+    try:
+        with zipfile.ZipFile(
+            temporary, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=4, allowZip64=True
+        ) as archive:
+            for path in files:
+                archive.write(path, 'CCRaw-Windows/' + path.relative_to(SOURCE).as_posix())
+        with zipfile.ZipFile(temporary) as archive:
+            corrupt = archive.testzip()
+            if corrupt:
+                raise RuntimeError(f'Portable ZIP failed CRC verification: {corrupt}')
+        temporary.replace(OUTPUT)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    with OUTPUT.open('rb') as stream:
+        digest = hashlib.file_digest(stream, 'sha256').hexdigest()
+    report = {
+        'version': __version__,
+        'archive': OUTPUT.name,
+        'sha256': digest,
+        'bytes': OUTPUT.stat().st_size,
+        'files': len(files),
+        'zip_crc_verified': True,
+        'distribution': 'Windows',
+        'onnxruntime_providers': onnxruntime.get_available_providers(),
+        'runtime_manifest_verified': True,
+    }
+    OUTPUT.with_suffix('.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+    print(json.dumps(report, indent=2))
+
+
+if __name__ == '__main__':
+    sys.exit(write_checksums() if '--checksums' in sys.argv else main())

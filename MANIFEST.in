@@ -1,0 +1,19 @@
+include LICENSE NOTICE README.md THIRD_PARTY.md MODEL.md
+include requirements*.txt main.py pyproject.toml
+include *.spec *.ps1 *.cmd *.command installer.iss
+include CONTRIBUTING.md
+recursive-include .github *.yml *.md
+recursive-include ccraw *.py *.svg *.ico *.png *.jpg *.json *.ttf *.txt
+recursive-include assets *.json *LICENSE*.txt OFL.txt ccraw.ico ccraw.svg
+recursive-include tools *.py *.ps1 *.sh
+recursive-include tests *.py
+recursive-include docs *.md
+global-exclude __pycache__ *.pyc *.nbc *.nbi
+prune build
+prune dist
+prune .venv
+prune .venv-release
+prune release-assets
+prune licenses
+prune .pytest_cache
+prune .asset-cache

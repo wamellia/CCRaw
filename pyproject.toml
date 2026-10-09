@@ -1,0 +1,45 @@
+[build-system]
+requires = ['setuptools>=77,<85']
+build-backend = 'setuptools.build_meta'
+
+[project]
+name = 'ccraw'
+dynamic = ['version', 'dependencies']
+description = 'Open-source desktop RAW editor with full-quality interactive previews'
+readme = 'README.md'
+requires-python = '>=3.12,<3.14'
+license = 'MIT'
+license-files = ['LICENSE', 'NOTICE']
+authors = [{name = 'CCRaw contributors'}]
+classifiers = ['Topic :: Multimedia :: Graphics :: Editors', 'Operating System :: Microsoft :: Windows', 'Operating System :: MacOS', 'Programming Language :: Python :: 3']
+
+[project.scripts]
+ccraw = 'ccraw.bootstrap:main'
+
+[project.optional-dependencies]
+dev = ['pytest>=8,<10', 'ruff>=0.12,<1', 'build>=1,<2', 'pyinstaller>=6.12,<7']
+
+[tool.setuptools.dynamic]
+version = {attr = 'ccraw.__version__'}
+dependencies = {file = ['requirements.txt']}
+
+[tool.setuptools.packages.find]
+include = ['ccraw*']
+
+[tool.setuptools.package-data]
+ccraw = ['resources/*']
+
+[tool.pytest.ini_options]
+testpaths = ['tests']
+addopts = '-ra'
+markers = ['runtime_assets: tests requiring the verified model/tool resource bundle']
+
+[tool.ruff]
+target-version = 'py312'
+line-length = 100
+
+[tool.ruff.lint]
+select = ['F821', 'F822', 'F823', 'F401']
+
+[tool.ruff.format]
+quote-style = 'single'

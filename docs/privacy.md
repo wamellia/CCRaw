@@ -1,0 +1,11 @@
+# Privacy
+
+Normal editing is local. CCRaw does not automatically upload photos, logs, settings or telemetry. Resource downloads are explicit setup actions and verified against the runtime manifest.
+
+Natural-language editing sends the entered instruction and the parameters/photo statistics needed for the selected model action to the configured service. Photo metadata used as context may include dimensions, camera/lens and exposure fields. If the user enables attachment, a reduced preview image is included. Local runners receive these requests locally; cloud providers receive them remotely under their own terms.
+
+Microphone audio is recognized locally with SenseVoice; recognized text follows the selected natural-language workflow. API settings and keys are per-user, separate from the repository. Windows uses DPAPI, other platforms use private file permissions. No settings are imported from the upstream application automatically.
+
+Image generation uses a separate, explicitly configured image service. It sends the prompt and, only when "发送参考图" is checked, an edited JPEG reference limited to 2048 pixels without EXIF. Original RAW files are not uploaded. Text-only generation sends no image. Templates, prompts, reference paths, recipe snapshots and generated images persist in the per-user `image-generation` folder; they are not stored in the source tree. API keys are not written to task history. Completed images are kept at the service's original resolution and encoding. Requests are not automatically retried. Cancelling stops local waiting and queued requests; a request already submitted may still be processed and billed by the provider. An interrupted session does not resubmit tasks on restart.
+
+Python logs rotate and redact credentials/private paths. Native crash logs are local, may include stack paths, and are bounded on the next startup. Review diagnostic material before sharing. Model/provider errors are redacted before display where keys are known.

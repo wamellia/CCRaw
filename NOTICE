@@ -1,0 +1,16 @@
+CCRaw
+Copyright (c) 2026 CCRaw contributors
+
+This distribution includes modified code derived from LUMEN RAW 1.5.0.
+Original code: Copyright (c) 2026 LUMEN RAW contributors, MIT License.
+The original MIT copyright and permission text is retained in LICENSE.
+
+The CCRaw name identifies this independent derivative. No affiliation with
+the upstream project or third-party model authors is implied.
+Third-party code, libraries, fonts and models retain their own licenses.
+See THIRD_PARTY.md, MODEL.md and the license texts accompanying the assets.
+
+The image-generation templates and their preview images are derived from
+Photo-Butler, Copyright (c) 2024 Photo Butler, ISC License.
+The original permission text is included in
+ccraw/resources/Photo-Butler-LICENSE.txt.

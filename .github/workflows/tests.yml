@@ -1,0 +1,59 @@
+name: CCRaw checks
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-15]
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install source and check dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Static checks
+        run: python -m ruff check ccraw tools tests main.py
+      - name: Format check
+        run: python -m ruff format --check ccraw tools tests main.py
+      - name: Tests
+        run: python -m pytest tests -q -m "not runtime_assets" --junitxml=test-results.xml
+      - name: Package metadata
+        run: python -m build
+      - name: Dependency consistency
+        run: python -m pip check
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-${{ matrix.os }}
+          path: test-results.xml
+  runtime:
+    if: ${{ vars.CCRAW_ASSET_URL != '' }}
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      CCRAW_ASSET_URL: ${{ vars.CCRAW_ASSET_URL }}
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python tools/fetch_assets.py
+      - run: python tools/fetch_assets.py --verify-only
+      - run: python -m pytest tests -q --junitxml=runtime-results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-runtime
+          path: runtime-results.xml
