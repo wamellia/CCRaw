@@ -1,4 +1,4 @@
-include LICENSE NOTICE README.md THIRD_PARTY.md MODEL.md
+include LICENSE NOTICE README.md README.en.md THIRD_PARTY.md MODEL.md
 include requirements*.txt main.py pyproject.toml
 include *.spec *.ps1 *.cmd installer.iss
 include CONTRIBUTING.md
