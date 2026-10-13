@@ -44,6 +44,9 @@ def to_srgb(rgb):
 def saturation(x, a):
     if not a.get('saturation', 0) and (not a.get('vibrance', 0)):
         return x
+    result = native_kernels.saturation(x, a.get('saturation', 0), a.get('vibrance', 0))
+    if result is not None:
+        return result
     lum = x[..., 0:1] * 0.2126 + x[..., 1:2] * 0.7152 + x[..., 2:3] * 0.0722
     amount = 1 + a.get('saturation', 0) / 100
     if a.get('vibrance', 0):
@@ -62,14 +65,73 @@ def color_stage(x, edits):
     return pipeline.color_grade(pipeline.color_base(x, edits), edits.get('grading', {}))
 
 
-def color_base(x, edits):
+def color_base(x, edits, cache=None, basis_key=None, input_key=None):
     """Color stages before grading, reusable while a wheel is dragged."""
-    x = pipeline.saturation(x, edits['adjustments'])
-    x = pipeline.apply_hsl(x, edits['hsl'])
-    x = pipeline.apply_curves(
-        x, edits['curves'], edits.get('curve_mode', 'linear'), edits.get('tone_curve')
+
+    def basic():
+        y = pipeline.saturation(x, edits['adjustments'])
+        y = pipeline.apply_hsl(y, edits['hsl'])
+        return pipeline.apply_curves(
+            y, edits['curves'], edits.get('curve_mode', 'linear'), edits.get('tone_curve')
+        )
+
+    pro = edits.get('professional', {})
+    points = pro.get('point_color', [])
+    cache_points = any(
+        p.get('enabled', True) and any(p.get(k, 0) for k in ('hue', 'saturation', 'luminance'))
+        for p in points
     )
-    if edits.get('monochrome', False):
+    x = (
+        cache.get('pre-professional', basis_key, basic)
+        if cache is not None and cache_points
+        else basic()
+    )
+    from ..domain.professional import neutral
+
+    mixed_bw = edits.get('monochrome', False) and any(pro.get('bw_mixer', []))
+    if pro and not neutral(pro):
+        from .professional import apply_color
+        from .profiles import apply_profile
+
+        x = apply_color(
+            x,
+            dict(pro, monochrome=mixed_bw),
+            space=edits.get('_rgb_space', 'sRGB'),
+            cache=cache,
+            basis_key=basis_key,
+        )
+        if pro.get('profile', {}).get('path'):
+            from pathlib import Path
+            from . import colorspaces as cs
+
+            profile = pro['profile']
+            space = edits.get('_rgb_space', 'sRGB')
+            if Path(profile['path']).suffix.lower() == '.dcp':
+                from .profiles import load_dcp
+
+                if profile.get('mode', 'auto') == 'camera':
+                    raise ValueError('DCP 相机矩阵需要启用宽色域显影。')
+                linear = cs.decode(x, space)
+                result = load_dcp(profile['path']).apply_look(linear, srcspace=space)
+                x = cs.encode(linear + (result - linear) * profile['amount'] / 100, space)
+            else:
+                resource_input = cs.convert(x, space, 'sRGB') if space != 'sRGB' else x
+                from ..engine import _key
+
+                result = apply_profile(
+                    resource_input,
+                    profile,
+                    cache=cache,
+                    basis_key=_key(
+                        basis_key,
+                        pro.get('calibration'),
+                        pro.get('point_color'),
+                        pro.get('bw_mixer') if mixed_bw else None,
+                        space,
+                    ),
+                )
+                x = cs.convert(result, 'sRGB', space) if space != 'sRGB' else result
+    if edits.get('monochrome', False) and not mixed_bw:
         x = pipeline.monochrome(x)
     return x
 
@@ -145,6 +207,9 @@ def color_grade(rgb, grading):
     """Three tonal wheels with luminance-neutral tint vectors and soft weights."""
     if not any((grading.get(z, [0, 0])[1] for z in ('shadows', 'midtones', 'highlights'))):
         return rgb
+    result = native_kernels.grade(rgb, grading)
+    if result is not None:
+        return result
     result = cpu_ops.grade(rgb, grading)
     if result is not None:
         return result

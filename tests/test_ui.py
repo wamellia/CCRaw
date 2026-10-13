@@ -25,16 +25,18 @@ def app():
 def wait_until(predicate, timeout=15):
     start = time.monotonic()
     while not predicate():
-        QTest.qWait(20)
-        # PySide's synthetic wait can retain the GIL on Windows; yield so the
-        # Python part of worker jobs can progress as it does under QApplication.exec.
-        time.sleep(0.002)
+        QApplication.processEvents()
+        # QTest.qWait can retain the GIL on Windows and starve background JIT
+        # compilation. Sleep releases it while events are pumped on each pass.
+        time.sleep(0.02)
         if time.monotonic() - start > timeout:
             raise AssertionError('异步操作超时')
 
 
 @pytest.fixture
 def window(app, tmp_path, monkeypatch):
+    monkeypatch.setenv('CCRAW_DATA_DIR', str(tmp_path / 'user'))
+    monkeypatch.setenv('CCRAW_CACHE_DIR', str(tmp_path / 'cache'))
     messages = []
     monkeypatch.setattr(QMessageBox, 'information', lambda *a: messages.append(a[2]))
     monkeypatch.setattr(QMessageBox, 'warning', lambda *a: messages.append(a[2]))
@@ -54,6 +56,10 @@ def window(app, tmp_path, monkeypatch):
     w.saved_snapshots = copy.deepcopy(w.snapshots)
     wait_until(lambda: not w.exporting and not w.loading and not w.render_running)
     w.close()
+    # A closed test window must not retain its polling timers and settings
+    # bindings for later tests, unlike a deliberately retained product window.
+    wait_until(lambda: not w.jobs)
+    w.deleteLater()
     QTest.qWait(30)
 
 
@@ -314,7 +320,9 @@ def test_multi_import_sync_retains_per_photo_edits_and_album(window, tmp_path):
     ]
     for i in range(3):
         w.filmstrip.item(i).setSelected(True)
-    w.sync_look()
+    from ccraw.domain.sync import DEFAULT
+
+    w.sync_look(sections=DEFAULT)
     other = w.documents[str(second.resolve())]
     assert other['edits']['adjustments']['exposure'] == 0.65
     assert other['edits']['crop'] is None and other['edits']['retouch'] == []
@@ -437,7 +445,9 @@ def test_panning_renders_only_newly_exposed_tiles(window, tmp_path):
     w = window
     open_detail_photo(w, tmp_path)
     before = dict(w.canvas.detail.main)
-    w.canvas.offset += QPointF(-700, 0)
+    # Preserve overlapping tiles even on the smaller, screen-bounded workspace.
+    distance = min(700, w.canvas.width() * 0.6)
+    w.canvas.offset += QPointF(-distance, 0)
     w.canvas.viewport_changed.emit()
     wait_until(lambda: detail_settled(w), timeout=30)
     after = w.canvas.detail.main

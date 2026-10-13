@@ -21,6 +21,8 @@ class Canvas(QWidget):
     sampled = Signal(object)
     clone_sampled = Signal(object)
     color_sampled = Signal(object)
+    target_started = Signal(object)
+    target_moved = Signal(float)
     viewport_changed = Signal()
     files_dropped = Signal(list)
 
@@ -32,6 +34,7 @@ class Canvas(QWidget):
         self.to_display = None
         self.brush_scale = 1.0
         self.overlay = None
+        self.grid_visible = False
         self.zoom = 1.0
         self.offset = QPointF()
         self.tool = 'view'
@@ -46,6 +49,7 @@ class Canvas(QWidget):
         self.end = None
         self.stroke = None
         self.pan = None
+        self.target_origin = None
         self.pointer = None
         self.mask_geometry = None
         self.before = None
@@ -228,6 +232,15 @@ class Canvas(QWidget):
         if self.start is not None or self.pan is not None or self.split_drag:
             return  # another button must not replace an active gesture
         if (
+            self.tool == 'bw-target'
+            and e.button() == Qt.MouseButton.LeftButton
+            and self.image_rect().contains(e.position())
+        ):
+            self.target_origin = e.position()
+            self.preview_dragging.emit(True)
+            self.target_started.emit(self.pos(e.position()))
+            return
+        if (
             e.button() == Qt.MouseButton.LeftButton
             and self.tool in ('sample', 'color')
             and self.image_rect().contains(e.position())
@@ -274,6 +287,9 @@ class Canvas(QWidget):
 
     def mouseMoveEvent(self, e):
         self.pointer = e.position()
+        if self.target_origin is not None:
+            self.target_moved.emit((self.target_origin.y() - e.position().y()) * 0.5)
+            return
         if self.split_drag:
             self.split_position = self.view_pos(e.position())[0]
         elif self.pan is not None:
@@ -305,6 +321,13 @@ class Canvas(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, e):
+        if self.target_origin is not None:
+            if e is not None and e.button() != Qt.MouseButton.LeftButton:
+                return
+            self.target_origin = None
+            self.preview_dragging.emit(False)
+            self.committed.emit()
+            return
         if self.start is not None and e is not None and e.button() != Qt.MouseButton.LeftButton:
             return
         if self.split_drag:
@@ -451,6 +474,17 @@ class Canvas(QWidget):
                 p.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
         if self.overlay is not None:
             p.drawImage(r, self.overlay)
+        if self.grid_visible:
+            p.setPen(QPen(QColor(240, 240, 240, 135), 1))
+            for i in range(1, 6):
+                p.drawLine(
+                    QPointF(r.left() + r.width() * i / 6, r.top()),
+                    QPointF(r.left() + r.width() * i / 6, r.bottom()),
+                )
+                p.drawLine(
+                    QPointF(r.left(), r.top() + r.height() * i / 6),
+                    QPointF(r.right(), r.top() + r.height() * i / 6),
+                )
         # Round only the four corner pixels. A full rounded clipping path makes
         # Qt composite every image pixel through a mask on each preview frame.
         # The small corner paths retain native fast image/tile painting at 100%.

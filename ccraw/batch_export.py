@@ -36,6 +36,7 @@ FORMATS = (
     ('PNG · 8-bit sRGB', '.png'),
     ('TIFF · 16-bit sRGB', '.tif'),
     ('DNG · 16-bit 线性成片', '.dng'),
+    ('PSD · 合并 RGB · 8/16-bit', '.psd'),
 )
 #: Output sizes: None keeps the full size, otherwise the long edge in pixels (never enlarged).
 SIZES = (
@@ -57,7 +58,7 @@ class BatchExportDialog(QDialog):
         root.addWidget(title)
         text = QLabel(
             '每张照片使用各自的调色、裁切、蒙版、修复与水印，从全尺寸原片逐张生成；原片不会被修改。\n'
-            '同名文件不会被覆盖，会自动加编号。AI 超分辨率请在单张导出中使用。'
+            '同名文件不会被覆盖，会自动加编号。AI 超分会逐张处理并报告分块进度。'
         )
         text.setWordWrap(True)
         text.setObjectName('subtle')
@@ -84,6 +85,19 @@ class BatchExportDialog(QDialog):
             form.addRow(name, widget)
         form.addRow('保存到', row)
         root.addLayout(form)
+        from .ui.professional_export import ExportSettings
+
+        self.professional = ExportSettings()
+        root.addWidget(self.professional)
+        self.scale = QComboBox()
+        self.scale.addItems(['原始尺寸', '2× AI 超分', '4× AI 超分'])
+        self.method = QComboBox()
+        self.method.addItems(['快速增强', 'Real-ESRGAN'])
+        form.addRow('AI 超分', self.scale)
+        form.addRow('增强算法', self.method)
+        self.format.currentIndexChanged.connect(
+            lambda index: self.professional.set_format(('jpeg', 'png', 'tiff', 'dng', 'psd')[index])
+        )
         self.status = QLabel('')
         self.status.setObjectName('subtle')
         root.addWidget(self.status)
@@ -111,11 +125,21 @@ class BatchExportDialog(QDialog):
         self.accept()
 
     def options(self):
+        preset = self.professional.options()
+        if preset:
+            preset['quality'] = self.quality.value()
+            # Existing size picker remains authoritative unless a custom long edge was entered.
+            preset['long_edge'] = (
+                self.professional.long_edge.value() or SIZES[self.size.currentIndex()][1] or 0
+            )
         return dict(
             extension=FORMATS[self.format.currentIndex()][1],
             long_edge=SIZES[self.size.currentIndex()][1],
             quality=self.quality.value(),
             folder=self.folder.text(),
+            preset=preset,
+            scale=(1, 2, 4)[self.scale.currentIndex()],
+            model_path=':builtin:' if self.method.currentIndex() else '',
         )
 
 
@@ -162,13 +186,71 @@ def run(items, options, backend, progress, cancel):
             edits = model.validate(edits)
             if cancel.is_set():
                 break
-            result = engine.process(source, edits, backend)
+            preset = options.get('preset')
+            target_space = 'sRGB'
+            target_encoded = False
+            scale = options.get('scale', 1)
+            if preset:
+                from . import export_presets
+                from .imaging import colorspaces
+
+                preset = export_presets.validate(preset)
+                target_space = export_presets.PROFILE_NAMES[preset['color_space']]
+            if preset and scale == 1 and hasattr(engine, 'render_output'):
+                result = engine.render_output(
+                    source,
+                    edits,
+                    color_space=target_space,
+                    backend=backend,
+                    intent=preset['intent'],
+                )
+                target_encoded = True
+            else:
+                result = engine.process(source, edits, backend)
             del source
+            if scale > 1:
+                if result.shape[0] * result.shape[1] * scale * scale > engine.MAX_EXPORT_PIXELS:
+                    raise ValueError('AI 超分输出超过像素上限，请减小尺寸或裁切。')
+
+                def enhance_progress(done, blocks):
+                    progress(
+                        round(100 * (index + done / max(1, blocks)) / total),
+                        f'AI 超分 {index + 1}/{total} · 分块 {done}/{blocks} · {name}',
+                    )
+
+                result, _ = engine.super_resolve(
+                    result,
+                    scale,
+                    options.get('model_path') or None,
+                    getattr(backend, 'gpu_pointwise', False),
+                    enhance_progress,
+                    cancel,
+                )
+            if cancel.is_set():
+                break
             result = fit_long_edge(result, options['long_edge'])
             photo = info.get('photo', {})
-            result = watermark.apply(result, edits['watermark'], photo)
-            target = target_path(options['folder'], path, options['extension'], taken)
-            engine.export_image(target, result, options['quality'], photo=photo)
+            if preset:
+                target = export_presets.output_path(options['folder'], path, preset, index + 1)
+                if target is None:
+                    results.append((path, None, '已跳过同名文件'))
+                    continue
+                if not target_encoded:
+                    result = colorspaces.convert(result, 'sRGB', target_space)
+                if not preset['watermark']:
+                    preset['watermark'] = edits['watermark']
+                export_presets.export_rgb(
+                    target,
+                    result,
+                    preset,
+                    metadata=photo,
+                    provenance={'source': str(Path(path).resolve()), 'recipe': edits},
+                    cancelled=cancel.is_set,
+                )
+            else:
+                result = watermark.apply(result, edits['watermark'], photo)
+                target = target_path(options['folder'], path, options['extension'], taken)
+                engine.export_image(target, result, options['quality'], photo=photo)
             results.append((path, str(target), ''))
         except Exception as exc:
             log.exception('batch export failed for %s', path)

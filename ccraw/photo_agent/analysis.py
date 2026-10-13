@@ -1,6 +1,7 @@
 """Incremental local ingestion and non-destructive organization suggestions."""
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 import hashlib
 from pathlib import Path
 import threading
@@ -77,6 +78,18 @@ def analyze_photo(photo, project, models, cancel):
         except ValueError:
             pass
     features = models.analyze(image)
+    # Unavailable models mean unknown / retained evidence, never "no faces".
+    retained = []
+    if not features.get('features', {}).get('semantic'):
+        for key in ('vector', 'scenes'):
+            if photo['facts'].get(key):
+                features[key] = photo['facts'][key]
+                retained.append(key)
+    if not features.get('features', {}).get('faces') and photo['facts'].get('faces'):
+        features['faces'] = photo['facts']['faces']
+        retained.append('faces')
+    if retained:
+        features['retained_features'] = retained
     after = path.stat()
     if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns):
         raise ValueError('扫描时原片发生变化，请重新扫描。')
@@ -108,6 +121,18 @@ def analyze_photo(photo, project, models, cancel):
         analysis_signature=ANALYSIS_VERSION + ':' + models.signature,
         **features,
     )
+    facts['format'] = path.suffix.lower().lstrip('.')
+    try:
+        with Image.open(path) as metadata_source:
+            exif = metadata_source.getexif()
+            details = dict(exif.get_ifd(34665)) if 34665 in exif else {}
+            facts.update(
+                camera=' '.join(str(exif.get(key, '')) for key in (271, 272)).strip(),
+                lens=str(details.get(42036) or exif.get(42036) or ''),
+                iso=int(details.get(34855) or exif.get(34855) or 0),
+            )
+    except (OSError, ValueError, TypeError):
+        pass
     return facts, sha, after
 
 
@@ -146,7 +171,11 @@ def index_project(project, cancel=None, progress=lambda *_: None, *, force=False
 
                     project.update_photo(
                         photo['id'],
-                        facts={'error': redact(str(error))[:400], 'analysis_signature': signature},
+                        facts={
+                            **photo['facts'],
+                            'error': redact(str(error))[:400],
+                            'analysis_signature': signature,
+                        },
                         status='failed',
                     )
                     failed += 1
@@ -161,19 +190,23 @@ def index_project(project, cancel=None, progress=lambda *_: None, *, force=False
         raise
 
 
-def cluster_faces(faces):
-    groups = []
+def cluster_faces(faces, cancel=None):
+    groups, buckets = [], {}
     for face in sorted(faces, key=lambda f: f['id']):
+        if cancel and cancel.is_set():
+            raise InterruptedError('人物聚类已取消。')
         try:
             vector = normalized(face['vector'])
         except ValueError:
             continue
+        dominant = int(np.argmax(np.abs(vector)))
+        key = (len(vector), dominant, bool(vector[dominant] >= 0))
+        candidates = buckets.get(key, [])[-128:]
         group = next(
             (
                 g
-                for g in groups
-                if len(g['vectors']) < 64
-                and g['vectors'][0].shape == vector.shape
+                for g in candidates
+                if g['vectors'][0].shape == vector.shape
                 and all(float(v @ vector) >= 0.55 for v in g['vectors'])
             ),
             None,
@@ -187,25 +220,64 @@ def cluster_faces(faces):
                 vectors=[],
             )
             groups.append(group)
-        group['vectors'].append(vector)
+            buckets.setdefault(key, []).append(group)
+        if len(group['vectors']) < 32:
+            group['vectors'].append(vector)
         group['faces'].append(face['id'])
         if face['photo_id'] not in group['photos']:
             group['photos'].append(face['photo_id'])
     return [{k: v for k, v in g.items() if k != 'vectors'} for g in groups]
 
 
-def suggestions(project):
-    # Bound a suggestion pass; coverage is shown rather than hiding an incomplete scan.
-    photos = [p for p in project.photos(10000) if p['status'] == 'ready']
+def suggestions(project, cancel=None, progress=lambda *_: None):
+    cancel = cancel or threading.Event()
+    from ..catalog import Catalog
+
+    catalog = Catalog(project)
+    with project.connect() as db:
+        removed = {
+            r[0]
+            for r in db.execute('SELECT photo_ref FROM photo_state WHERE removed_at IS NOT NULL')
+        }
+    photos = []
+    total = project.summary()['photos']
+    for offset in range(0, total, 200):
+        if cancel.is_set():
+            raise InterruptedError('整理建议已取消；已完成的照片分析会保留。')
+        photos.extend(
+            p
+            for p in project.photos(200, offset)
+            if p['status'] == 'ready' and p['id'] not in removed
+        )
+        progress(
+            round(min(total, offset + 200) / max(total, 1) * 30),
+            f'读取分析事实 {min(total, offset + 200)} / {total}',
+        )
     exact, similar, quality, events, faces = {}, [], [], [], []
     buckets = {}
-    for photo in photos:
+    for number, photo in enumerate(photos):
+        if cancel.is_set():
+            raise InterruptedError('整理建议已取消；已完成的照片分析会保留。')
+        if number % 200 == 0:
+            project.preference(
+                'analysis_checkpoint',
+                {
+                    'phase': 'similarity',
+                    'processed': number,
+                    'total': len(photos),
+                    'version': ANALYSIS_VERSION,
+                },
+            )
+            progress(
+                30 + round(number / max(len(photos), 1) * 50),
+                f'相似与质量候选 {number} / {len(photos)}',
+            )
         facts, photo_id = photo['facts'], photo['id']
         if photo['sha']:
             exact.setdefault(photo['sha'], []).append(photo_id)
         if facts.get('flags'):
             quality.append(dict(photos=[photo_id], reasons=facts['flags'], confidence='heuristic'))
-        phash = int(facts['phash'], 16)
+        phash = int(facts.get('phash', '0'), 16)
         # Four locality buckets bound comparisons while retaining close hashes.
         candidates = {
             p['id']: p
@@ -217,8 +289,13 @@ def suggestions(project):
             if candidate['sha'] == photo['sha']:
                 continue
             distance = (phash ^ int(other['phash'], 16)).bit_count()
-            aspect = abs(facts['width'] / facts['height'] - other['width'] / other['height'])
-            color = np.linalg.norm(np.array(facts['mean_rgb']) - other['mean_rgb'])
+            aspect = abs(
+                facts.get('width', 1) / max(facts.get('height', 1), 1)
+                - other.get('width', 1) / max(other.get('height', 1), 1)
+            )
+            color = np.linalg.norm(
+                np.array(facts.get('mean_rgb', [0, 0, 0])) - other.get('mean_rgb', [0, 0, 0])
+            )
             if distance <= 6 and aspect < 0.08 and color < 35:
                 similar.append(
                     dict(
@@ -234,22 +311,38 @@ def suggestions(project):
             if len(bucket) > 128:
                 del bucket[0]
         for i, face in enumerate(facts.get('faces', [])):
-            if len(faces) < 3000:
-                faces.append(dict(id=f'{photo_id}:{i}', photo_id=photo_id, vector=face['vector']))
-    timed = sorted(
-        (p for p in photos if p['facts'].get('captured_at')),
-        key=lambda p: p['facts']['captured_at'],
-    )
-    for photo in timed:
+            faces.append(dict(id=f'{photo_id}:{i}', photo_id=photo_id, vector=face['vector']))
+    timed = []
+    timezone = ZoneInfo(project.manifest['timezone'])
+    for photo in photos:
+        try:
+            captured = datetime.fromisoformat(photo['facts'].get('captured_at'))
+            captured = captured if captured.tzinfo else captured.replace(tzinfo=timezone)
+            timed.append((captured.timestamp(), photo))
+        except (TypeError, ValueError):
+            continue
+    timed.sort(key=lambda pair: (pair[0], pair[1]['id']))
+    burst = []
+    previous_time = None
+    for index, (when, photo) in enumerate(timed):
+        if index % 200 == 0:
+            if cancel.is_set():
+                raise InterruptedError('事件与连拍建议已取消；已完成的分析保留。')
+            project.preference(
+                'analysis_checkpoint',
+                {
+                    'phase': 'events',
+                    'processed': index,
+                    'total': len(timed),
+                    'version': ANALYSIS_VERSION,
+                },
+            )
+            progress(
+                80 + round(index / max(1, len(timed)) * 4), f'事件与连拍候选 {index}/{len(timed)}'
+            )
         captured = photo['facts']['captured_at']
         previous = events[-1] if events else None
-        if (
-            previous
-            and (
-                datetime.fromisoformat(captured) - datetime.fromisoformat(previous['end'])
-            ).total_seconds()
-            <= 4 * 3600
-        ):
+        if previous and previous_time is not None and when - previous_time <= 4 * 3600:
             previous['photos'].append(photo['id'])
             previous['end'] = captured
         else:
@@ -262,17 +355,94 @@ def suggestions(project):
                     confidence='time_candidate',
                 )
             )
-    return dict(
+        previous_time = when
+        same_scene = False
+        if burst and when - burst[-1][0] <= 3:
+            left, right = burst[-1][1]['facts'], photo['facts']
+            if left.get('phash') and right.get('phash'):
+                same_scene = (int(left['phash'], 16) ^ int(right['phash'], 16)).bit_count() <= 12
+        if not same_scene:
+            if len(burst) > 1:
+                similar.append(
+                    dict(
+                        photos=[item[1]['id'] for item in burst],
+                        grouping='burst',
+                        start=burst[0][1]['facts']['captured_at'],
+                        confidence='time_and_scene_candidate',
+                    )
+                )
+            burst = []
+        burst.append((when, photo))
+    if len(burst) > 1:
+        similar.append(
+            dict(
+                photos=[item[1]['id'] for item in burst],
+                grouping='burst',
+                start=burst[0][1]['facts']['captured_at'],
+                confidence='time_and_scene_candidate',
+            )
+        )
+    progress(85, f'匿名人物聚类 {len(faces)} 张脸')
+    inferred_people = catalog.stabilize_clusters(cluster_faces(faces, cancel), cancel)
+    people = catalog.apply_cluster_corrections(inferred_people)
+    report = dict(
         duplicates=[
             dict(photos=ids, confidence='sha256') for ids in exact.values() if len(ids) > 1
-        ][:200],
-        similar=similar[:200],
-        quality=quality[:200],
-        events=events[:200],
-        people=cluster_faces(faces),
-        coverage=dict(analyzed=len(photos), total=project.summary()['photos'], face_limit=3000),
+        ],
+        similar=similar,
+        quality=quality,
+        events=events,
+        people=people,
+        inferred_people=inferred_people,
+        coverage=dict(analyzed=len(photos), total=total, faces=len(faces), candidate_limit=128),
         features=dict(
             semantic=any(p['facts'].get('features', {}).get('semantic') for p in photos),
             faces=any(p['facts'].get('features', {}).get('faces') for p in photos),
         ),
     )
+    lookup = {p['id']: p for p in photos}
+    with project.connect() as db:
+        decisions = {
+            row['id']: row['decision']
+            for row in db.execute('SELECT id,decision FROM suggestion_decisions')
+        }
+    for kind in ('duplicates', 'similar', 'quality', 'events', 'people'):
+        for group in report[kind]:
+            group['decision'] = decisions.get(catalog.suggestion_id(kind, group))
+            if kind in ('duplicates', 'similar'):
+
+                def quality_rank(ref):
+                    quality = lookup[ref]['facts'].get('quality', {})
+                    clipping = min(
+                        1,
+                        max(0, float(quality.get('bright', 0)))
+                        + max(0, float(quality.get('dark', 0))),
+                    )
+                    return (-float(quality.get('sharpness', 0)) * (1 - clipping), ref)
+
+                ranked = sorted(
+                    group['photos'],
+                    key=quality_rank,
+                )
+                group['best_candidate'] = ranked[0] if ranked else None
+                group['reasons'] = [
+                    (
+                        '3 秒内且场景相近的连拍候选'
+                        if group.get('grouping') == 'burst'
+                        else 'SHA256 相同'
+                        if kind == 'duplicates'
+                        else f'相似哈希距离 {group.get("distance", 0)}'
+                    ),
+                    '按清晰度与曝光剪切比例排序；建议需人工判断',
+                ]
+    project.preference(
+        'analysis_checkpoint',
+        {
+            'phase': 'completed',
+            'processed': len(photos),
+            'total': len(photos),
+            'version': ANALYSIS_VERSION,
+        },
+    )
+    progress(100, '整理建议已完成')
+    return report

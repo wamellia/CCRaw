@@ -5,7 +5,10 @@ import asyncio
 import json
 
 from . import analysis, editing, search
+from .controls import PATCH_SCHEMA, describe
+from .. import model
 from .. import image_generation
+from .catalog_tools import NAMES as CATALOG_TOOL_NAMES
 
 
 def bounded_result(value):
@@ -13,7 +16,9 @@ def bounded_result(value):
 
     def trim(item, cap):
         if isinstance(item, dict):
-            result = {key: trim(value, cap) for key, value in item.items()}
+            result = {
+                key: value if key == 'schema' else trim(value, cap) for key, value in item.items()
+            }
             for key, value in item.items():
                 if isinstance(value, list) and len(value) > cap:
                     result[key + '_omitted'] = len(value) - cap
@@ -31,14 +36,18 @@ def bounded_result(value):
     raise ValueError('工具结果过大，请缩小任务范围。')
 
 
-TOOL_NAMES = (
+EDIT_TOOL_NAMES = (
     'album_report',
     'search_photos',
     'diagnose_photo',
     'recommend_edits',
     'propose_adjustment',
     'propose_external_edit',
+    'get_edit_controls',
+    'propose_batch_adjustment',
+    'preview_edit',
 )
+TOOL_NAMES = EDIT_TOOL_NAMES + CATALOG_TOOL_NAMES
 
 
 @dataclass(frozen=True)
@@ -50,9 +59,11 @@ class Capability:
 
 def capabilities():
     return {
-        'organize': Capability('organize', ('album_report',), ('project.read',)),
+        'organize': Capability(
+            'organize', ('album_report',) + CATALOG_TOOL_NAMES, ('project.read', 'catalog.write')
+        ),
         'retrieve': Capability('retrieve', ('search_photos',), ('project.read', 'local.models')),
-        'edit': Capability('edit', TOOL_NAMES[2:], ('selected.read', 'proposal.write')),
+        'edit': Capability('edit', EDIT_TOOL_NAMES[2:], ('selected.read', 'proposal.write')),
     }
 
 
@@ -88,7 +99,7 @@ def photo_registry(project, selected, cancel, models):
 
     def selected_photo(photo_id):
         if photo_id not in selected:
-            raise ValueError('请先在界面选中需要修改的照片。')
+            raise ValueError('请先选中需要修改的照片（界面选择或 MCP --select）。')
         project.photo(photo_id)
         return photo_id
 
@@ -105,13 +116,30 @@ def photo_registry(project, selected, cancel, models):
         return search.search(project, query, models=models)
 
     def diagnosis(photo_id):
-        return editing.diagnose(project, selected_photo(photo_id))
+        return editing.diagnose(project, selected_photo(photo_id), cancel)
 
     def recommend(photo_id):
-        return proposals(editing.propose_local(project, selected_photo(photo_id)))
+        return proposals(editing.propose_local(project, selected_photo(photo_id), cancel=cancel))
 
     def adjust(photo_id, patch):
-        return proposals(editing.propose_local(project, selected_photo(photo_id), patch))
+        return proposals(editing.propose_local(project, selected_photo(photo_id), patch, cancel))
+
+    def controls(photo_id=None, section='adjustments'):
+        recipe = (
+            model.recipe()
+            if photo_id is None
+            else project.preferences().get('recipe:' + selected_photo(photo_id), model.recipe())
+        )
+        return describe(recipe, section)
+
+    def batch(photo_ids, patch):
+        for photo_id in photo_ids:
+            selected_photo(photo_id)
+        return proposals(editing.propose_batch(project, photo_ids, patch, cancel))
+
+    def preview(proposal_id, max_edge=1024):
+        selected_photo(project.get_proposal(proposal_id)['photo_id'])
+        return editing.preview_local(project, proposal_id, max_edge, cancel)
 
     def external(photo_id, prompt):
         proposal = editing.propose_external(
@@ -136,13 +164,19 @@ def photo_registry(project, selected, cancel, models):
                     id=p['id'],
                     label=p['payload']['label'],
                     adjustments=p['payload']['recipe']['adjustments'],
+                    photo_id=p['photo_id'],
+                    crop=p['payload']['recipe']['crop'],
+                    rotation=p['payload']['recipe']['rotation'],
+                    mask_count=len(p['payload']['recipe']['masks']),
                     status='awaiting UI selection',
                 )
                 for p in items
             ]
         )
 
-    photo_parameter = dict(type='string', description='当前界面选中的工程照片 ID')
+    photo_parameter = dict(
+        type='string', description='已授权的工程照片 ID（界面选择或 MCP --select）'
+    )
 
     def params(properties, required=()):
         return dict(
@@ -198,10 +232,8 @@ def photo_registry(project, selected, cancel, models):
         ToolSpec(
             'propose_adjustment',
             'edit',
-            '根据自然语言创建无损编辑方案。patch 使用 CCRaw adjustments、hsl、grading、curve、effects 字段；不会执行编辑。',
-            params(
-                {'photo_id': photo_parameter, 'patch': {'type': 'object'}}, ['photo_id', 'patch']
-            ),
+            '为选中照片创建无损编辑方案，支持调色、曲线、裁切、旋转、拉直与几何蒙版；patch 设置目标值，先查询 get_edit_controls；不会执行编辑。',
+            params({'photo_id': photo_parameter, 'patch': PATCH_SCHEMA}, ['photo_id', 'patch']),
             adjust,
             False,
         ),
@@ -216,7 +248,55 @@ def photo_registry(project, selected, cancel, models):
             external,
             False,
         ),
+        ToolSpec(
+            'get_edit_controls',
+            'edit',
+            '查询参数分区的类型、范围与当前值；不传 photo_id 返回默认值。裁切和蒙版坐标为原片未旋转坐标 0…1。',
+            params(
+                {
+                    'photo_id': photo_parameter,
+                    'section': dict(type='string', enum=list(PATCH_SCHEMA['properties'])),
+                }
+            ),
+            controls,
+        ),
+        ToolSpec(
+            'propose_batch_adjustment',
+            'edit',
+            '对已授权的 1–30 张照片创建同一绝对值 patch 的方案，保留各照片未修改的配方字段；等待逐张预览与确认。',
+            params(
+                {
+                    'photo_ids': dict(
+                        type='array',
+                        items=photo_parameter,
+                        minItems=1,
+                        maxItems=30,
+                        uniqueItems=True,
+                    ),
+                    'patch': PATCH_SCHEMA,
+                },
+                ['photo_ids', 'patch'],
+            ),
+            batch,
+            False,
+        ),
+        ToolSpec(
+            'preview_edit',
+            'edit',
+            '渲染选中照片的待确认本地方案，返回当前调整和方案效果预览；不会应用、上传或创建派生版本。',
+            params(
+                {
+                    'proposal_id': dict(type='string'),
+                    'max_edge': dict(type='integer', minimum=256, maximum=2048),
+                },
+                ['proposal_id'],
+            ),
+            preview,
+        ),
     ]
+    from .catalog_tools import definitions as catalog_definitions
+
+    definitions.extend(catalog_definitions(project, selected, cancel, ToolSpec))
     for capability in capabilities().values():
         registry.register(capability, [t for t in definitions if t.capability == capability.name])
     return registry

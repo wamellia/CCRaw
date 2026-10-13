@@ -415,8 +415,12 @@ class WorkspaceMixin:
     def straighten_changed(self, value):
         if not self.refreshing:
             self.edits['straighten'] = value
+            # Presentation changes are part of the worker snapshot. Rotating and
+            # converting full preview pixels here blocked Qt on every slider tick.
+            self.final_view.blockSignals(True)
             self.final_view.setChecked(True)
-            self.update_display()
+            self.final_view.blockSignals(False)
+            self.update_tool()
             self.changed()
 
     def range_value(self, key, value):

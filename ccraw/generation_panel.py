@@ -199,7 +199,9 @@ class TemplateBrowser(QDialog):
         self.filter()
 
     def filter(self, *_):
-        query, category = self.search.text().strip().casefold(), self.category.currentText()
+        from .i18n import source_item
+
+        query, category = self.search.text().strip().casefold(), source_item(self.category)
         self.items.clear()
         for template in self.templates:
             if query not in (template['name'] + ' ' + template.get('category', '')).casefold():
@@ -440,14 +442,9 @@ class GenerationPanel(QScrollArea):
         self.service.setToolTip(self.settings['model'])
 
     def configure(self):
-        dialog = GenerationSettings(self, self.settings)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            try:
-                gen.save_settings(dialog.values())
-                self.settings = dialog.values()
-                self.update_service()
-            except OSError as error:
-                self.status.setText('设置未保存：' + str(error))
+        from .ui.settings_dialog import show_settings
+
+        return show_settings(self.window(), 'generation')
 
     def browse_templates(self):
         if self.active_mode == 'custom':

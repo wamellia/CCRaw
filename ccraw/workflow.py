@@ -86,7 +86,9 @@ class WorkflowMixin:
         active = self.source is not None and not self.work.busy(A.LOADING, A.AI)
         self.tabs.setEnabled(True)
         for index in range(self.tabs.count()):
-            self.tabs.widget(index).widget().setEnabled(active)
+            page = self.tabs.widget(index)
+            content = page.widget() if hasattr(page, 'widget') else page
+            content.setEnabled(active)
         self.backend_combo.setEnabled(active)
         self.refresh_history_buttons()
         self.menu_save.setEnabled(active)

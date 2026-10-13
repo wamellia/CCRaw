@@ -86,7 +86,9 @@ class ProjectDelegate(QStyledItemDelegate):
         path_rect = QRectF(x, y + 26, max(1, row.right() - x - 14), 20)
         path = record['path']
         if not Path(path).is_file():
-            path = '工程文件不存在 · ' + path
+            from ..i18n import translate
+
+            path = translate('工程文件不存在 · ') + path
         path = painter.fontMetrics().elidedText(
             path, Qt.TextElideMode.ElideMiddle, int(path_rect.width())
         )
@@ -179,6 +181,9 @@ class Launcher(QMainWindow):
         self.project_search.textChanged.connect(self.refresh_recent)
         self.update_style()
         self.refresh_recent()
+        from ..ui.settings_dialog import install_settings
+
+        install_settings(self)
 
     def action(self, text, callback, symbol, *, primary=False):
         control = QPushButton(text)

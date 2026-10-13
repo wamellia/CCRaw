@@ -257,6 +257,22 @@ class DetailSource:
                     self.levels[k] = cv2.resize(
                         image, level_size(width, height, k), interpolation=cv2.INTER_AREA
                     )
+                    from .imaging.io import ImageSource
+
+                    if isinstance(image, ImageSource):
+                        self.levels[k] = ImageSource(
+                            self.levels[k],
+                            **{
+                                name: getattr(image, name, None)
+                                for name in (
+                                    'source_path',
+                                    'raw_path',
+                                    'camera_kelvin',
+                                    'camera_neutral',
+                                    'decode_info',
+                                )
+                            },
+                        )
                 image = self.levels[k]
             return image
 
@@ -328,6 +344,10 @@ def render(holder, request, cancel):
                 request.get('cache'),
             )
             pixels += block.shape[0] * block.shape[1]
+            if request.get('color_settings') is not None:
+                from .imaging.display import convert
+
+                block = convert(block, request['color_settings'])
         tiles = {}
         if request.get('pixel_rect') is not None:
             tiles[(x0, y0)] = make_tile(block, x0, y0)

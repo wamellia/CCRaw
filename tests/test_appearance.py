@@ -34,8 +34,8 @@ def test_theme_reaches_painters_and_dialogs_without_changing_pixels(window, app,
 
 def test_all_adjustment_pages_remain_accessible(window):
     w = window
-    assert w.tool_select.count() == w.tabs.count() == 9
-    for index in range(9):
+    assert w.tool_select.count() == w.tabs.count() == 10
+    for index in range(w.tabs.count()):
         w.tool_select.setCurrentIndex(index)
         assert w.tabs.currentIndex() == index
     w.tabs.setCurrentIndex(0)

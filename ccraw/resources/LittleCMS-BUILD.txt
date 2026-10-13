@@ -1,0 +1,28 @@
+LittleCMS base color management engine 2.18 (MIT)
+Author: Marti Maria Saguer, copyright 1998-2026.
+Official source: https://github.com/mm2/Little-CMS
+Tag: lcms2.18
+Commit: 35b57af4e1a4d6d7a40ba188f9f4efb7857ff511
+License: LittleCMS-LICENSE.txt in this directory.
+
+Bundled lcms2.dll was built for Windows x64 on 2026-10-12 using
+Microsoft MSVC 19.42.34438, base engine only, no commercial plugins.
+This library contains no third-party ICC profiles or camera profiles.
+
+Rebuild in an x64 Native Tools Command Prompt from the official source root:
+  cl /nologo /O2 /MT /LD /DCMS_DLL_BUILD /I include src\*.c /link /OUT:lcms2.dll
+Copy lcms2.dll to ccraw/resources/lcms2.dll alongside this license and notice.
+/MT statically links the C runtime. The resulting DLL depends only on KERNEL32.dll.
+ABI: LittleCMS 2 Windows x64 DLL (__stdcall exports; ctypes.WinDLL).
+Python wrapper: ccraw/imaging/cms.py (RGB float32 / uint16 native formats).
+Linux/macOS wrapper can load system liblcms2 using ctypes.util.find_library.
+No user-global package installation is required or performed.
+
+SHA-256 of this DLL:
+732d12808801aa95085bfa877c48cd2870b048a390bcb70b94689a516e0fac9b
+
+Distribution integration:
+setuptools package-data ccraw resources/* includes the DLL and notices.
+PyInstaller must include resources/lcms2.dll at ccraw/resources/lcms2.dll.
+cms.available()/status() exposes runtime failure; UI should disable arbitrary
+ICC/profile proofing when unavailable. Named-space float math remains usable.

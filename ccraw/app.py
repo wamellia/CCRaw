@@ -56,6 +56,7 @@ class MainWindow(
         self.render_cache = engine.RenderCache()
         self.preview_buffers = live_preview.PreviewBuffers()
         self.preview_quality = live_preview.PreviewQuality()
+        self.decoded_previews = live_preview.DecodedPreviews()
         self._preview_dragging = 0
         self._preview_epoch = 0
         self._preview_started = 0.0
@@ -113,9 +114,38 @@ class MainWindow(
         self.input_gestures.dragging.connect(self.preview_drag)
         self.input_gestures.committed.connect(self.commit)
         # Compile/load native kernels before a first curve gesture, off the GUI.
-        self.job(native_kernels.warm, lambda _: None, priority=-2)
+        for step in native_kernels.warm_steps():
+            self.job(step, lambda _: None, priority=-2)
         self.shortcuts()
         self.refresh()
+        from .ui.settings_dialog import install_settings
+
+        install_settings(self)
+
+    def changed(self, *args):
+        super().changed(*args)
+        binding = getattr(self, '_settings_binding', None)
+        if binding is not None:
+            binding.note_edit()
+
+    def commit(self, *args):
+        super().commit(*args)
+        binding = getattr(self, '_settings_binding', None)
+        if binding is not None:
+            binding.note_edit()
+
+    def open_path(self, path):
+        binding = getattr(self, '_settings_binding', None)
+        if binding is not None and not binding.flush():
+            return
+        return super().open_path(path)
+
+    def closeEvent(self, event):
+        binding = getattr(self, '_settings_binding', None)
+        if binding is not None and not binding.flush():
+            event.ignore()
+            return
+        super().closeEvent(event)
 
 
 def main():
@@ -134,6 +164,15 @@ def main():
 
     window = Launcher()
     window.show()
+    if len(sys.argv) == 1 and window._settings_binding.service.read()['general']['offer_recovery']:
+        from .recovery import RecoveryStore
+        from .ui.settings_dialog import show_settings
+
+        if any(
+            Path(session['state'].get('source_path', '')).is_file()
+            for session in RecoveryStore().sessions()
+        ):
+            QTimer.singleShot(100, lambda: show_settings(window, 'recovery'))
     if len(sys.argv) > 1 and Path(sys.argv[1]).is_file():
         path = sys.argv[1]
         if Path(path).suffix.lower() == '.ccrawagent':

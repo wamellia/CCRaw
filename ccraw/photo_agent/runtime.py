@@ -18,6 +18,9 @@ SYSTEM = """你是 CCRaw Photo Agent，只服务于当前工程的照片整理�
 日期使用当前工程时区。只有 EXIF/用户标注才是拍摄时间，文件修改时间不能替代。
 人物簇、人脸检测、场景分类与质量诊断是候选信号。检索结果必须区分已验证人数与未知人数。
 编辑只针对界面已选定的照片，先本地诊断，再推荐不超过三种方案。
+调参前可用 get_edit_controls 查询分区的类型、范围与当前值；不得猜测参数名。
+patch 设置绝对目标值；用户要求相对调整时先读取当前值再计算目标，各照片目标不同时分别创建方案。
+批量调整用 propose_batch_adjustment，一次最多 30 张已选照片。创建本地方案后可调用 preview_edit 供用户查看。
 本地/外部编辑工具只创建方案，界面负责选择执行；不得声称已上传、已修改或已删除。
 外部方案必须解释 Provider、上传内容和费用。引用照片 ID，不编造照片或工具执行结果。
 仅使用提供的照片工具；不执行 shell、任意文件访问、网页访问或后台自主付款。用简洁中文回答。"""
@@ -135,7 +138,7 @@ async def run_turn(
                 SYSTEM
                 + '\npropose_adjustment.patch 数值是最终值。adjustments 范围：'
                 + parameters
-                + '\nhsl 用颜色键 red/orange/yellow/green/aqua/blue/purple/magenta，hue/saturation/luminance -100…100；grading 用 shadows/midtones/highlights，hue 0…360、saturation 0…100；curve 用含两端点的 0…255 点对；effects 用 vignette/grain。优先使用已有参数；选区、裁切和专业处理可打开照片编辑继续。'
+                + '\nhsl 用颜色键 red/orange/yellow/green/aqua/blue/purple/magenta；grading 用 shadows/midtones/highlights；curve 为 0…255 点对，curves 的 RGB/R/G/B 为 0…1 点对，均含 x=0 与 x=最大值端点。crop=[x0,y0,x1,y1] 为原片未旋转坐标 0…1，rotation 为顺时针 90° 次数 0…3，straighten=-15…15°。masks 支持 kind=linear/radial/luminance/brush，start/end 为 0…1，adjustments 为局部参数；index 可修改已有蒙版。AI 选区、修复与堆栈仍通过照片编辑器。参数超界或未知字段会被拒绝。'
             )
 
     class TraceHook(AgentHook):
@@ -187,7 +190,8 @@ async def run_turn(
             sessions_root=project.directory('sessions'),
         ),
         max_iterations=8,
-        context_window_tokens=16384,
+        # Count the expanded professional/catalog schemas inside a fixed budget.
+        context_window_tokens=32768,
         max_tool_result_chars=6000,
         restrict_to_workspace=True,
         hooks=[TraceHook(reraise=True)],

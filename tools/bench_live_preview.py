@@ -22,7 +22,14 @@ def main():
     parser.add_argument('output')
     parser.add_argument('--root', default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument('--seconds', type=float, default=3)
+    parser.add_argument('--process', type=int, choices=(1, 2), default=1)
+    parser.add_argument('--scenarios', help='Comma-separated scenario names; default runs all')
     args = parser.parse_args()
+    destination = Path(args.output)
+    os.environ.setdefault('CCRAW_DATA_DIR', str(destination.parent / (destination.stem + '-user')))
+    os.environ.setdefault(
+        'CCRAW_CACHE_DIR', str(destination.parent / (destination.stem + '-cache'))
+    )
     sys.path.insert(0, args.root)
     import numpy as np
     from PySide6.QtCore import QEventLoop, QTimer, QPoint, Qt
@@ -69,9 +76,25 @@ def main():
         ('clarity', 'clarity'),
         ('hsl', 'hsl'),
         ('vignette', 'vignette'),
+        ('professional_geometry', 'horizontal'),
+        ('professional_optics', 'vignetting'),
+        ('professional_detail', 'amount'),
+        ('professional_calibration', 'red_hue'),
+        ('professional_point', 'hue'),
+        ('professional_bw', 'bw'),
+        ('professional_profile', 'profile'),
+        ('professional_eye', 'eye'),
+        ('straighten', 'straighten'),
     ]
+    if args.scenarios:
+        wanted = set(args.scenarios.split(','))
+        missing = wanted - {name for name, _ in scenarios}
+        if missing:
+            raise ValueError('Unknown scenarios: ' + ', '.join(sorted(missing)))
+        scenarios = [row for row in scenarios if row[0] in wanted]
     for name, parameter in scenarios:
         w.reset_edits()
+        w.process_select.setCurrentIndex(args.process - 1)
         w.canvas.fit()
         w.tabs.setCurrentIndex(0)
         settle()
@@ -83,6 +106,41 @@ def main():
         elif name == 'zoom_100':
             w.canvas.actual_size()
             settle()
+        elif name.startswith('professional_'):
+            w.tabs.setCurrentIndex(9)
+            panel = w.professional_editor
+            group = name.removeprefix('professional_')
+            if group in ('geometry', 'optics', 'detail', 'calibration'):
+                panel.tabs.setCurrentIndex(
+                    {'optics': 0, 'geometry': 1, 'calibration': 2, 'detail': 3}[group]
+                )
+                control = panel.controls[group, parameter]
+            elif group == 'point':
+                h, width = w.source.shape[:2]
+                color = engine.to_srgb(
+                    w.source[h // 2 : h // 2 + 1, width // 2 : width // 2 + 1]
+                ).clip(0, 1)[0, 0]
+                panel.add_color_sample(color.tolist())
+                panel.tabs.setCurrentIndex(5)
+                control = panel.point_controls['hue']
+            elif group == 'bw':
+                w.mono_check.setChecked(True)
+                panel.tabs.setCurrentIndex(4)
+                control = panel.bw_controls[0]
+            elif group == 'profile':
+                path = output.parent / 'benchmark-look.cube'
+                path.write_text('LUT_1D_SIZE 2\n0.05 0.0 0.0\n0.9 1.0 0.95\n')
+                panel.import_profile(path)
+                panel.tabs.setCurrentIndex(6)
+                control = panel.profile_amount
+            else:
+                panel.add_red_eye([0.8, 0.5])
+                panel.tabs.setCurrentIndex(7)
+                control = panel.eye_amount
+            settle()
+        elif name == 'straighten':
+            w.tabs.setCurrentIndex(5)
+            control = w.straighten
         widget = None
         if name in ('curve', 'exposure_curve', 'grading_wheel'):
             w.tabs.setCurrentIndex({'curve': 1, 'exposure_curve': 0, 'grading_wheel': 6}[name])
@@ -99,13 +157,17 @@ def main():
             slider = None
         else:
             control = (
-                w.local_controls[parameter]
-                if name == 'local_mask'
-                else w.hsl_controls[1]
-                if name == 'hsl'
-                else w.effect_controls[parameter]
-                if name == 'vignette'
-                else w.controls[parameter]
+                control
+                if name.startswith('professional_') or name == 'straighten'
+                else (
+                    w.local_controls[parameter]
+                    if name == 'local_mask'
+                    else w.hsl_controls[1]
+                    if name == 'hsl'
+                    else w.effect_controls[parameter]
+                    if name == 'vignette'
+                    else w.controls[parameter]
+                )
             )
             slider = control.slider
         before = w.canvas.image.copy()
@@ -159,6 +221,10 @@ def main():
             nonlocal step, end
             step += 1
             low, high = (-1.2, 1.2) if parameter == 'exposure' else (0, 70)
+            if name == 'straighten':
+                low, high = -8, 8
+            elif parameter in ('hue', 'horizontal', 'red_hue'):
+                low, high = -40, 40
             t = (np.sin(step * 0.08) + 1) / 2
             if widget is not None:
                 end = start + QPoint(
@@ -233,6 +299,7 @@ def main():
         source_size=[w.info['width'], w.info['height']],
         preview_size=list(w.source.shape[1::-1]),
         backend='CPU',
+        process=args.process,
         event_loop='Qt QEventLoop; 12ms input timer; 10ms heartbeat',
         results=rows,
         errors=errors,

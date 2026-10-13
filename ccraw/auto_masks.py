@@ -50,6 +50,8 @@ class AutoMaskMixin:
         self.update_tool()
 
     def pick_color_region(self, point):
+        if not self.color_region_button.isChecked():
+            return
         self.create_auto_mask('color', point)
         self.color_region_button.setChecked(False)
 

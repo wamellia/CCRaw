@@ -57,12 +57,16 @@ def main(argv=None):
         return 0
     if '--help' in sys.argv[1:] or '-h' in sys.argv[1:]:
         print(
-            'CCRaw: ccraw [photo.ccraw | image | album.ccrawalbum | project.ccrawagent ...]\nOptions: --version, --help'
+            'CCRaw: ccraw [photo.ccraw | image | album.ccrawalbum | project.ccrawagent ...]\nOptions: --version, --help\nMCP: ccraw --agent-mcp project.ccrawagent [--select PHOTO_ID ...]'
         )
         return 0
     if sys.platform != 'win32':
         print('CCRaw supports Windows only.', file=sys.stderr)
         return 2
+    if sys.argv[1:2] == ['--agent-mcp']:
+        from ccraw.photo_agent.mcp_server import main as run_mcp
+
+        return run_mcp(sys.argv[2:])
     import multiprocessing
 
     # The frozen app re-enters here to start the AI worker process (spawn).

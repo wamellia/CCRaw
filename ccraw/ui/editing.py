@@ -7,6 +7,130 @@ from .. import performance
 
 
 class EditingMixin:
+    def process_changed(self, index):
+        if not self.refreshing:
+            self.edits['process'] = index + 1
+            self.changed()
+            self.commit()
+
+    def professional_changed(self, settings):
+        if self.refreshing:
+            return
+        from ..domain import professional
+
+        self.edits['professional'] = professional.validate(settings)
+        from pathlib import Path
+
+        profile = settings.get('profile', {})
+        if (
+            Path(profile.get('path', '')).suffix.lower() == '.dcp'
+            and profile.get('mode', 'auto') != 'look'
+            and getattr(self.source, 'raw_path', None)
+        ):
+            self.edits['process'] = 2
+            self.process_select.blockSignals(True)
+            self.process_select.setCurrentIndex(1)
+            self.process_select.blockSignals(False)
+        self.clear_preset_selection()
+        self.changed()
+
+    def professional_sampling(self, mode):
+        if self.source is None:
+            return
+        self._professional_sample = mode
+        self.color_region_button.setChecked(False)
+        self.wb_button.setChecked(False)
+        self.update_tool()
+
+    def professional_bw_auto(self):
+        if self.source is None:
+            return
+        from ..imaging.professional import automatic_bw
+
+        self.edits['monochrome'] = True
+        self.mono_check.setChecked(True)
+        self.professional_editor.set_bw_values(automatic_bw(self.preview_original()))
+
+    def professional_constrain(self):
+        if self.source is None:
+            return
+        import copy
+        from ..imaging.professional import constrained_crop
+
+        shape, pro = self.source.shape, copy.deepcopy(self.edits['professional'])
+        document, revision = self.document_token, self.generation
+        button = self.professional_editor.constrain_button
+        button.setEnabled(False)
+
+        def ready(crop):
+            button.setEnabled(True)
+            if self.document_token == document and self.generation == revision:
+                self.commit()
+                self.edits['crop'] = crop
+                self.final_view.setChecked(True)
+                self.refresh()
+                self.changed()
+                self.commit()
+
+        def fail(message):
+            button.setEnabled(True)
+            if self.document_token == document:
+                self.error(message)
+
+        self.job(lambda: constrained_crop(shape, pro), ready, fail)
+
+    def professional_bw_start(self, point):
+        if self.source is None:
+            return
+        import numpy as np
+        from ..imaging.professional import bw_target_band
+
+        x = round(np.clip(point[0], 0, 1) * (self.source.shape[1] - 1))
+        y = round(np.clip(point[1], 0, 1) * (self.source.shape[0] - 1))
+        rgb = engine.to_srgb(self.source[y : y + 1, x : x + 1]).clip(0, 1)[0, 0]
+        self._bw_target_index = bw_target_band(rgb)
+        self._bw_target_value = (
+            self.edits['professional']['bw_mixer'][self._bw_target_index]
+            if self._bw_target_index is not None
+            else 0
+        )
+        self.edits['monochrome'] = True
+        self.mono_check.setChecked(True)
+
+    def professional_bw_move(self, distance):
+        index = getattr(self, '_bw_target_index', None)
+        if index is not None:
+            self.professional_editor.bw_controls[index].setValue(
+                max(-100, min(100, self._bw_target_value + distance))
+            )
+            self.professional_editor._set_bw(
+                index, self.professional_editor.bw_controls[index].spin.value()
+            )
+
+    def professional_sample(self, point):
+        mode = getattr(self, '_professional_sample', None)
+        if not mode or self.source is None:
+            return
+        self._professional_sample = None
+        if mode == 'eye':
+            self.professional_editor.add_red_eye(list(point))
+        else:
+            import numpy as np
+
+            x = round(np.clip(point[0], 0, 1) * (self.source.shape[1] - 1))
+            y = round(np.clip(point[1], 0, 1) * (self.source.shape[0] - 1))
+            rgb = engine.to_srgb(self.source[y : y + 1, x : x + 1]).clip(0, 1)[0, 0].tolist()
+            self.professional_editor.add_color_sample(rgb)
+        self.update_tool()
+
+    def professional_lensfun(self, settings):
+        from ..domain import professional
+
+        proposed = professional.merge(self.edits['professional'], {'lensfun': settings})
+        self.professional_editor.set_values(proposed)
+        self.professional_changed(proposed)
+        self.commit()
+
     def watermark_changed(self, settings):
         if self.refreshing or self.source is None:
             return
@@ -90,6 +214,40 @@ class EditingMixin:
             else None
         )
 
+    def edit_mask_components(self):
+        from .mask_components import MaskComponentsDialog
+        from PySide6.QtWidgets import QDialog
+
+        mask = self.selected_mask()
+        if mask is None:
+            return
+        before = copy.deepcopy(self.edits)
+        document, index = self.document_token, self.current_mask
+        dialog = MaskComponentsDialog(mask, self.edits['masks'], self)
+
+        def preview(parts):
+            if self.document_token == document and index < len(self.edits['masks']):
+                self.edits['masks'][index]['components'] = copy.deepcopy(parts)
+                self.changed()
+
+        dialog.changed.connect(preview)
+        self.preview_drag(True)
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+            if self.document_token == document:
+                if accepted:
+                    self.edits['masks'][index]['components'] = copy.deepcopy(dialog.parts)
+                    self.edits = model.validate(self.edits)
+                else:
+                    self.edits = before
+                self.refresh()
+                self.changed()
+        finally:
+            self.preview_drag(False)
+            dialog.deleteLater()
+        if accepted:
+            self.commit()
+
     def add_mask(self, kind):
         if self.source is None:
             return
@@ -159,6 +317,14 @@ class EditingMixin:
         self.refreshing = old
 
     def update_overlay(self, *_):
+        if (
+            self.tabs.currentIndex() == 9
+            and self.professional_editor.tabs.currentIndex() == 5
+            and self.professional_editor.range_preview.isChecked()
+            and not self.comparing
+            and not self.split_check.isChecked()
+        ):
+            return  # The image worker computes the range with the current color stage.
         mask = self.selected_mask()
         if (
             self.source is not None
@@ -168,8 +334,11 @@ class EditingMixin:
             and not self.comparing
             and not self.split_check.isChecked()
         ):
-            reference = self.preview_original() if mask['kind'] == 'luminance' else None
+            reference = self.preview_original() if engine._has_luminance(mask) else None
             alpha = engine.mask_alpha(mask, self.source.shape, reference)
+            from ..imaging.professional import warp_mask
+
+            alpha = warp_mask(alpha, self.edits.get('professional', {}))
             self.canvas.set_overlay(
                 engine.crop_rotate(alpha, self.edits) if self.final_view.isChecked() else alpha
             )
@@ -177,6 +346,12 @@ class EditingMixin:
             self.canvas.set_overlay(None)
 
     def update_tool(self, *_):
+        self.canvas.grid_visible = (
+            hasattr(self, 'professional_editor')
+            and self.tabs.currentIndex() == 9
+            and self.professional_editor.tabs.currentIndex() == 1
+            and self.professional_editor.geometry_grid.isChecked()
+        )
         if self.comparing or self.split_check.isChecked():
             self.canvas.tool = 'view'
         elif (
@@ -184,6 +359,14 @@ class EditingMixin:
             and self.color_region_button.isChecked()
             and self.tabs.currentIndex() == 4
         ):
+            self.canvas.tool = 'color'
+        elif (
+            self.tabs.currentIndex() == 9
+            and self.professional_editor.tabs.currentIndex() == 4
+            and self.professional_editor.bw_target.isChecked()
+        ):
+            self.canvas.tool = 'bw-target'
+        elif getattr(self, '_professional_sample', None) and self.tabs.currentIndex() == 9:
             self.canvas.tool = 'color'
         elif self.wb_sampling:
             self.canvas.tool = 'sample'
@@ -362,6 +545,9 @@ class EditingMixin:
         self.develop_hint.setText(self.edits['develop']['source'])
         self.update_library_status()
         self.refresh_retouch()
+        if hasattr(self, 'professional_editor'):
+            self.professional_editor.setRecipe(self.edits)
+            self.process_select.setCurrentIndex(self.edits.get('process', 1) - 1)
         self.save_button.setEnabled(self.source is not None and not self.work.busy(A.LOADING))
         self.export_button.setEnabled(
             self.source is not None and not self.work.busy(A.EXPORTING, A.LOADING)

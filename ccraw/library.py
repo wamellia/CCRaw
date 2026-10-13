@@ -95,6 +95,10 @@ class LibraryMixin:
         row.addWidget(self.library_count)
         row.addWidget(self.button('导入', self.open_file))
         row.addWidget(self.button('保存选片集', self.save_album))
+        from .catalog.window import open_catalog_for_editor
+
+        self.catalog_button = self.button('管理相册', lambda: open_catalog_for_editor(self))
+        row.addWidget(self.catalog_button)
         row.addStretch()
         tip = QLabel(f'{host.COMMAND} / Shift 多选 · 单击切换照片')
         tip.setObjectName('subtle')
@@ -144,8 +148,10 @@ class LibraryMixin:
         if not self.thumbnail_queue or not self.work.can_start(A.THUMBNAILS):
             return
         self.work.begin(A.THUMBNAILS)
-        batch = self.thumbnail_queue[:4]
-        del self.thumbnail_queue[:4]
+        # Yield between photos so a foreground open/preview does not wait behind
+        # four cold RAW reads from a slow disk or network share.
+        batch = self.thumbnail_queue[:1]
+        del self.thumbnail_queue[:1]
 
         def work():
             images = []
@@ -169,7 +175,7 @@ class LibraryMixin:
             self.work.end(A.THUMBNAILS)
             self.next_film_thumbnails()
 
-        self.job(work, ready, fail)
+        self.job(work, ready, fail, priority=-1)
 
     def film_item(self, path):
         for i in range(self.filmstrip.count()):
@@ -177,6 +183,40 @@ class LibraryMixin:
             if item.data(Qt.ItemDataRole.UserRole) == path:
                 return item
         return None
+
+    def relink_catalog_documents(self, paths):
+        """Move document and filmstrip keys together after catalog relinking."""
+        changes = {
+            old: str(Path(new).resolve())
+            for old, new in paths.items()
+            if old in self.documents and str(Path(new).resolve()) != old
+        }
+        for old, new in changes.items():
+            if new in self.documents and new not in changes:
+                raise ValueError('重新关联的照片已在编辑器中打开。')
+        self.documents = {
+            changes.get(path, path): document for path, document in self.documents.items()
+        }
+        for path, document in self.documents.items():
+            document['path'] = path
+        for index in range(self.filmstrip.count()):
+            item = self.filmstrip.item(index)
+            old = item.data(Qt.ItemDataRole.UserRole)
+            if old in changes:
+                new = changes[old]
+                item.setData(Qt.ItemDataRole.UserRole, new)
+                item.setText(Path(new).name)
+                item.setToolTip(new)
+        self.thumbnail_queue = [changes.get(path, path) for path in self.thumbnail_queue]
+        self.thumbnail_queue.extend(
+            path for path in changes.values() if path not in self.thumbnail_queue
+        )
+        self.source_path = changes.get(self.source_path, self.source_path)
+        if changes:
+            self.library_structure_dirty = True
+            self.update_library_status()
+            self.next_film_thumbnails()
+        return changes
 
     def film_clicked(self, item):
         modifiers = QApplication.keyboardModifiers()
@@ -403,12 +443,21 @@ class LibraryMixin:
         self.library_count.setText(f'选片集 · {len(self.documents)} 张 / 已选 {count} 张')
         self.sync_button.setEnabled(self.source is not None and count > 0 and not self.loading)
 
-    def sync_look(self):
+    def sync_look(self, checked=False, sections=None):
         if self.source is None or self.loading:
             return
+        from .domain.sync import transfer
+
+        if sections is None:
+            from .ui.sync_dialog import SyncDialog
+            from PySide6.QtWidgets import QDialog
+
+            dialog = SyncDialog(self)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            sections = dialog.sections()
         self.commit()
         self.stash_document()
-        look = model.extract_look(self.edits)
         count = 0
         for item in self.filmstrip.selectedItems():
             path = item.data(Qt.ItemDataRole.UserRole)
@@ -416,14 +465,12 @@ class LibraryMixin:
                 continue
             document = self.documents[path]
             before = copy.deepcopy(document['edits'])
-            document['edits'] = model.apply_look(before, look)
+            document['edits'] = transfer(self.edits, before, sections)
             history = document.setdefault('history', model.History(before))
             history.push(document['edits'])
             item.setText(Path(path).name + ' •')
             count += 1
-        self.statusBar().showMessage(
-            f'已套用到 {count} 张照片 · 保留各自裁切、蒙版、修复与相机显影基准'
-        )
+        self.statusBar().showMessage(f'已同步 {len(sections)} 个分组到 {count} 张照片')
 
     def save_album(self, checked=False, path=None):
         self.stash_document()

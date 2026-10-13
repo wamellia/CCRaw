@@ -11,7 +11,7 @@ def test_old_recipe_migrates_without_changing_pixels():
         old.pop(key)
     old['adjustments'].pop('texture')
     new = model.validate(old)
-    assert new['version'] == 5
+    assert new['version'] == 6
     source = np.random.default_rng(5).random((30, 40, 3)).astype(np.float32) * 0.6
     np.testing.assert_allclose(engine.process(source, new), engine.process(source, old), atol=1e-6)
 

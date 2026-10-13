@@ -5,7 +5,7 @@ build-backend = 'setuptools.build_meta'
 [project]
 name = 'ccraw'
 dynamic = ['version', 'dependencies']
-description = 'Windows desktop RAW editor with real-time previews and image generation'
+description = 'Windows RAW editor and Photo Agent with professional color, catalog and creative tools'
 readme = 'README.md'
 requires-python = '>=3.12,<3.14'
 license = 'MIT'

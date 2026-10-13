@@ -1,7 +1,6 @@
 from __future__ import annotations
 import copy
 import time
-import threading
 import numpy as np
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
@@ -12,6 +11,20 @@ from .. import live_preview, viewport
 
 
 class PreviewMixin:
+    def configure_softproof(self, settings):
+        from ..imaging.display import profile
+
+        if settings.get('enabled'):
+            profile(settings['path'], rgb_only=False)
+        self._softproof = copy.deepcopy(settings)
+        self.tiles.clear()
+        self.changed()
+
+    def color_presentation(self):
+        from ..imaging.display import snapshot
+
+        return snapshot(self)
+
     def changed(self):
         if self.refreshing or self.source is None:
             return
@@ -68,6 +81,15 @@ class PreviewMixin:
             if self.tabs.currentIndex() == 4 and self.overlay_check.isChecked()
             else None
         )
+        if (
+            self.tabs.currentIndex() == 9
+            and self.professional_editor.tabs.currentIndex() == 5
+            and self.professional_editor.range_preview.isChecked()
+        ):
+            index = self.professional_editor.sample_combo.currentIndex()
+            points = self.edits['professional']['point_color']
+            if 0 <= index < len(points):
+                mask = {'kind': 'point-range', 'point': copy.deepcopy(points[index])}
         return (
             self.final_view.isChecked(),
             self.comparing,
@@ -133,6 +155,9 @@ class PreviewMixin:
                 proxy_scale=max(0.1, source.shape[1] / self.info.get('width', source.shape[1])),
             )
         options = copy.deepcopy(self.preview_options())
+        color_settings = self.color_presentation()
+        if detail_request is not None:
+            detail_request['color_settings'] = color_settings
         region_only = detail_request is not None and options[5] is None
         previous_rgb = self.rendered
         if region_only:
@@ -143,16 +168,36 @@ class PreviewMixin:
         self.statusBar().showMessage('实时预览…' if interactive else '正在更新预览…')
         started = time.perf_counter()
         self._preview_started = started
+        cancel = live_preview.FrameCancellation(
+            lambda: (
+                self.closing
+                or source is not self.source
+                or document != self.document_token
+                or epoch != self._preview_epoch
+                or self.work.busy(A.LOADING)
+            )
+        )
 
         def work():
             if region_only:
-                return live_preview.prepare_region(holder, detail_request, view, previous_rgb)
+                return live_preview.prepare_region(
+                    holder, detail_request, view, previous_rgb, cancel
+                )
             scale = max(0.1, source.shape[1] / original_width)
             output = live_preview.prepare(
-                source, edits, backend, self.render_cache, scale, original, options, interactive
+                source,
+                edits,
+                backend,
+                self.render_cache,
+                scale,
+                original,
+                options,
+                interactive,
+                color_settings=color_settings,
+                check=cancel.check,
             )
             if detail_request is not None:
-                output.detail = (view, viewport.render(holder, detail_request, threading.Event()))
+                output.detail = (view, viewport.render(holder, detail_request, cancel))
                 output.seconds = time.perf_counter() - started
             return output
 
@@ -245,9 +290,9 @@ class PreviewMixin:
 
         def failed(text):
             self.work.end(A.RENDER)
-            if token == self.generation:
+            if not cancel.is_set() and token == self.generation:
                 self.error('预览处理失败：\n' + text)
-            elif self.pending and not self.closing:
+            elif not self.closing and (self.pending or cancel.is_set()):
                 self.timer.start(0)
 
         original_width = self.info.get('width', source.shape[1])
@@ -283,12 +328,30 @@ class PreviewMixin:
             self.canvas.to_source = self.canvas.to_display = None
             self.canvas.reference_size = size
             self.canvas.brush_scale = 1.0
+        from ..imaging.professional import geometry_neutral, source_point, display_point
+
+        pro = self.edits.get('professional', {})
+        if self.tabs.currentIndex() != 5 and not geometry_neutral(pro):
+            original_to_source, original_to_display = self.canvas.to_source, self.canvas.to_display
+            shape = (size[1], size[0], 3)
+            self.canvas.to_source = lambda p: source_point(
+                original_to_source(p) if original_to_source else p, shape, pro
+            )
+            self.canvas.to_display = lambda p: (
+                original_to_display(display_point(p, shape, pro))
+                if original_to_display
+                else display_point(p, shape, pro)
+            )
         display = (
             prepared.display_rgb
             if prepared is not None
             else (engine.crop_rotate(image, self.edits) if final else image)
         )
-        self.canvas.set_image(prepared.image if prepared is not None else display)
+        from ..imaging.display import convert
+
+        self.canvas.set_image(
+            prepared.image if prepared is not None else convert(display, self.color_presentation())
+        )
         split = self.split_check.isChecked() and not self.comparing
         before = (
             prepared.before
@@ -297,7 +360,12 @@ class PreviewMixin:
                 (engine.crop_rotate(original, self.edits) if final else original) if split else None
             )
         )
-        self.canvas.set_before(before, split)
+        self.canvas.set_before(
+            before
+            if prepared is not None or before is None
+            else convert(before, self.color_presentation()),
+            split,
+        )
         if prepared is not None:
             self.canvas.set_prepared_clipping(
                 prepared.clipping,

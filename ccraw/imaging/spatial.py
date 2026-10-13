@@ -62,31 +62,61 @@ def reduce_noise(x, a):
     return x
 
 
-def spatial_details(rgb, a, detail_scale=1.0, reference_shape=None, dehaze_context=None, area=None):
+def spatial_details(
+    rgb,
+    a,
+    detail_scale=1.0,
+    reference_shape=None,
+    dehaze_context=None,
+    area=None,
+    cache=None,
+    basis_key=None,
+):
     """Neighbourhood tools. ``reference_shape`` keeps radii of a padded region equal to the full frame;
     a block of a frame (``area``) takes its dehaze statistics from ``dehaze_context``."""
     x = np.ascontiguousarray(rgb, dtype=np.float32)
     short = min((reference_shape or x.shape)[:2])
-    x = pipeline.reduce_noise(x, a)
+
+    def reuse(stage, key, fn):
+        return fn() if cache is None else cache.get(stage, key, fn)
+
+    key = pipeline._key(basis_key, a.get('denoise', 0), a.get('color_noise', 0))
+    x = reuse('spatial-noise', key, lambda: pipeline.reduce_noise(x, a))
     if a.get('dehaze', 0) > 0:
         x = pipeline.dehaze(x, a.get('dehaze', 0), dehaze_context, area)
     elif a.get('dehaze', 0) < 0:
         x = x * (1 + a.get('dehaze', 0) / 220) - a.get('dehaze', 0) / 220
+    key = pipeline._key(key, a.get('dehaze', 0), area, short)
     if a.get('clarity', 0):
-        lum = cv2.cvtColor(x, cv2.COLOR_RGB2GRAY)
-        blur = cv2.GaussianBlur(lum, (0, 0), max(1.0, short / 90))
-        x = np.clip(x + ((lum - blur) * a.get('clarity', 0) / 65)[..., None], 0, 1)
+
+        def clarity_band():
+            lum = cv2.cvtColor(x, cv2.COLOR_RGB2GRAY)
+            return lum - cv2.GaussianBlur(lum, (0, 0), max(1.0, short / 90))
+
+        band = reuse('clarity-band', key, clarity_band)
+        x = np.clip(x + (band * a.get('clarity', 0) / 65)[..., None], 0, 1)
+    key = pipeline._key(key, a.get('clarity', 0))
     if a.get('texture', 0):
-        lum = cv2.cvtColor(x, cv2.COLOR_RGB2GRAY)
-        radius = max(0.65, short / 800)
-        fine = cv2.GaussianBlur(lum, (0, 0), radius)
-        coarse = cv2.GaussianBlur(lum, (0, 0), radius * 3.5)
-        band = np.clip(fine - coarse, -0.08, 0.08)
+
+        def texture_band():
+            lum = cv2.cvtColor(x, cv2.COLOR_RGB2GRAY)
+            radius = max(0.65, short / 800)
+            fine = cv2.GaussianBlur(lum, (0, 0), radius)
+            coarse = cv2.GaussianBlur(lum, (0, 0), radius * 3.5)
+            return np.clip(fine - coarse, -0.08, 0.08)
+
+        band = reuse('texture-band', key, texture_band)
         x = np.clip(x + (band * a['texture'] / 65)[..., None], 0, 1)
+    key = pipeline._key(key, a.get('texture', 0), detail_scale)
     if a.get('sharpness', 0) > 0:
-        blur = cv2.GaussianBlur(x, (0, 0), max(0.45, detail_scale))
-        delta = x - blur
-        delta *= np.minimum(1, np.abs(delta) / 0.008)
+
+        def sharpen_band():
+            blur = cv2.GaussianBlur(x, (0, 0), max(0.45, detail_scale))
+            delta = x - blur
+            delta *= np.minimum(1, np.abs(delta) / 0.008)
+            return delta
+
+        delta = reuse('sharpen-band', key, sharpen_band)
         x = np.clip(x + delta * a.get('sharpness', 0) / 40, 0, 1)
     return x
 
@@ -112,6 +142,24 @@ def details(rgb, a, detail_scale=1.0, reference_shape=None):
 
 def mask_alpha(mask, shape, reference=None, area=None):
     """Coverage of a mask over a frame of ``shape``, or only over the block ``area`` of it."""
+    if mask.get('components'):
+        base = dict(mask)
+        base.pop('components')
+        base.update(opacity=100, invert=False)
+        alpha = mask_alpha(base, shape, reference, area)
+        for component in mask['components']:
+            if not component['mask'].get('enabled', True):
+                continue
+            part = mask_alpha(component['mask'], shape, reference, area)
+            if component['op'] == 'add':
+                alpha = np.maximum(alpha, part)
+            elif component['op'] == 'subtract':
+                alpha = alpha * (1 - part)
+            else:
+                alpha = alpha * part
+        if mask['invert']:
+            alpha = 1 - alpha
+        return (alpha * (mask['opacity'] / 100)).astype(np.float32)
     h, w = shape[:2]
     area = area or pipeline.Area(w, h, 0, 0, w, h)
     ah, aw = area.shape
@@ -209,8 +257,10 @@ def apply_local(x, alpha, a, backend, detail_scale=1.0, reference_shape=None):
         py0, py1 = (max(0, y0 - margin), min(h, y1 + margin))
         px0, px1 = (max(0, x0 - margin), min(w, x1 + margin))
     patch = x[py0:py1, px0:px1]
-    local = pipeline.details(
-        backend.tonal(pipeline.to_linear(patch), a),
+    local = (backend.details if hasattr(backend, 'details') else pipeline.details)(
+        backend.tonal(
+            backend.decode(patch) if hasattr(backend, 'decode') else pipeline.to_linear(patch), a
+        ),
         a,
         detail_scale,
         reference_shape=reference_shape,

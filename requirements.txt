@@ -1,5 +1,6 @@
 numpy>=2.2,<3
 numexpr>=2.10,<3
+threadpoolctl>=3.6,<4
 numba>=0.68,<0.69
 opencv-python-headless>=4.10,<6
 Pillow>=11,<13

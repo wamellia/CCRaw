@@ -76,16 +76,51 @@ def appearance_settings():
 
 
 def saved_appearance():
-    mode = appearance_settings().value('appearance', 'light')
-    return mode if mode in ('light', 'dark') else 'light'
+    from ..settings import get_service
+
+    service = get_service()
+    legacy = appearance_settings()
+    # Portable INI configurations remain an explicit legacy source. Registry
+    # preferences migrate only when the unified JSON has not been written yet.
+    if legacy.format() == QSettings.Format.IniFormat or not service.path.exists():
+        legacy.sync()
+        mode = legacy.value('appearance', 'light')
+        return mode if mode in ('light', 'dark', 'system') else 'light'
+    return service.read()['appearance']['theme']
+
+
+def system_appearance():
+    """Read the Windows app preference without changing the user's system settings."""
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize',
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, 'AppsUseLightTheme')
+        return 'light' if value else 'dark'
+    except (ImportError, OSError):
+        return 'light'
+
+
+def refresh_system_theme(app):
+    if (
+        app.property('appearanceMode') == 'system'
+        and app.property('appearanceResolved') != system_appearance()
+    ):
+        apply_theme(app, 'system')
 
 
 def set_appearance(mode):
-    if mode not in ('light', 'dark'):
+    if mode not in ('light', 'dark', 'system'):
         raise ValueError('外观模式无效。')
     settings = appearance_settings()
     settings.setValue('appearance', mode)
     settings.sync()
+    from ..settings import get_service
+
+    get_service().update({'appearance': {'theme': mode}})
     apply_theme(QApplication.instance(), mode)
 
 
@@ -198,7 +233,12 @@ def style_swatch(button, swatch, theme=None):
 
 def apply_theme(app, mode='light'):
     """Palette propagation keeps child dialogs and painters synchronized."""
-    t = DARK if mode == 'dark' else LIGHT
+    if app is None:
+        return LIGHT
+    resolved = system_appearance() if mode == 'system' else mode
+    app.setProperty('appearanceMode', mode)
+    app.setProperty('appearanceResolved', resolved)
+    t = DARK if resolved == 'dark' else LIGHT
     palette = QPalette()
     for role, value in {
         QPalette.Window: t.background,
@@ -217,8 +257,32 @@ def apply_theme(app, mode='light'):
         palette.setColor(role, QColor(value))
     for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
         palette.setColor(QPalette.Disabled, role, QColor(t.disabled))
+    style = stylesheet(t)
+    current = app.palette()
+    colors_match = all(
+        current.color(group, role) == palette.color(group, role)
+        for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled)
+        for role in (
+            QPalette.Window,
+            QPalette.WindowText,
+            QPalette.Base,
+            QPalette.Text,
+            QPalette.Button,
+            QPalette.ButtonText,
+            QPalette.Highlight,
+            QPalette.HighlightedText,
+        )
+    )
+    if colors_match and app.styleSheet() == style:
+        # Each open window receives the settings broadcast. Reapplying the same
+        # application stylesheet forces Qt to repolish every control each time.
+        # Still synchronize new menus and the light/dark/system selection.
+        for widget in app.allWidgets():
+            if isinstance(widget, (AppearanceMenu, AppearanceButton)):
+                widget.sync(mode)
+        return t
     app.setPalette(palette)
-    app.setStyleSheet(stylesheet(t))
+    app.setStyleSheet(style)
     font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
     font.setPixelSize(13)
     app.setFont(font)
@@ -241,7 +305,7 @@ class AppearanceMenu(QMenu):
         self.group = QActionGroup(self)
         self.group.setExclusive(True)
         self.mode_actions = {}
-        for title, mode in [('浅色', 'light'), ('深色', 'dark')]:
+        for title, mode in [('浅色', 'light'), ('深色', 'dark'), ('跟随系统', 'system')]:
             action = self.addAction(title)
             action.setCheckable(True)
             action.setData(mode)
@@ -251,7 +315,7 @@ class AppearanceMenu(QMenu):
         self.sync('dark' if tokens() == DARK else 'light')
 
     def sync(self, mode):
-        self.mode_actions['dark' if mode == 'dark' else 'light'].setChecked(True)
+        self.mode_actions.get(mode, self.mode_actions['light']).setChecked(True)
 
 
 class AppearanceButton(QPushButton):
@@ -269,4 +333,8 @@ class AppearanceButton(QPushButton):
         self.sync('dark' if tokens() == DARK else 'light')
 
     def sync(self, mode):
-        self.setText('外观：深色' if mode == 'dark' else '外观：浅色')
+        self.setText(
+            {'dark': '外观：深色', 'light': '外观：浅色', 'system': '外观：跟随系统'}.get(
+                mode, '外观：浅色'
+            )
+        )

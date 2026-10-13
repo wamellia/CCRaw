@@ -128,9 +128,11 @@ def fits_in_memory(shape):
     return available is None or shape[0] * shape[1] * 100 <= available * 0.85
 
 
-def process(source, edits, backend, apply_crop, detail_scale, cache=None):
+def process(source, edits, backend, apply_crop, detail_scale, cache=None, check=None):
     """Stream point operations. Spatial edits retain the original whole-image math."""
     from . import engine
+
+    check = check or (lambda: None)
 
     a = edits['adjustments']
     spatial = any(
@@ -141,6 +143,9 @@ def process(source, edits, backend, apply_crop, detail_scale, cache=None):
     spatial |= bool(
         edits.get('effects', {}).get('vignette') or edits.get('effects', {}).get('grain')
     )
+    from .domain.professional import neutral
+
+    spatial |= not neutral(edits.get('professional', {}))
     if spatial:
         available = available_memory()
         required = source.shape[0] * source.shape[1] * 100
@@ -149,11 +154,19 @@ def process(source, edits, backend, apply_crop, detail_scale, cache=None):
                 f'当前空间类编辑预计需要约 {required / 2**30:.1f} GB 可用内存。可先裁切、关闭质感／蒙版／修复，或在内存更大的电脑处理。4 亿像素的基础调色、AI 副本和 DNG 导出使用分块缓存。'
             )
         return engine.process(
-            source, edits, backend, apply_crop, detail_scale, _stream=False, cache=cache
+            source,
+            edits,
+            backend,
+            apply_crop,
+            detail_scale,
+            _stream=False,
+            cache=cache,
+            check=check,
         )
     output = allocate(source.shape)
     for y, block in strips(source):
+        check()
         output[y : y + len(block)] = engine.process(
-            block, edits, backend, False, detail_scale, _stream=False
+            block, edits, backend, False, detail_scale, _stream=False, check=check
         )
     return transform(output, edits) if apply_crop else output

@@ -1,6 +1,6 @@
 """Responsive photo cards with explicit, colour-preserving image rendering."""
 
-from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QImageReader, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QListWidget, QStyle, QStyledItemDelegate
 
@@ -35,7 +35,10 @@ class PhotoDelegate(QStyledItemDelegate):
         painter.setBrush(theme.color('selection' if selected else 'hover' if hovered else 'panel'))
         painter.drawRoundedRect(card, 8, 8)
         side = max(1, card.width() - 20)
-        frame = QRectF(card.left() + 10, card.top() + 10, side, side)
+        # Compact catalog toolbars can leave less height than a square card.
+        # Fit every image inside the visible card, keeping both text rows below it.
+        frame_height = max(40, min(side, card.height() - 2 * option.fontMetrics.height() - 34))
+        frame = QRectF(card.left() + 10, card.top() + 10, side, frame_height)
         painter.fillRect(frame, theme.color('canvas'))
         pixmap = index.data(Qt.ItemDataRole.DecorationRole)
         if isinstance(pixmap, QPixmap) and not pixmap.isNull():
@@ -80,6 +83,21 @@ class PhotoDelegate(QStyledItemDelegate):
 
 
 class PhotoGallery(QListWidget):
+    culling_key = Signal(str, object)
+
+    def keyPressEvent(self, event):
+        if event.modifiers() == Qt.KeyboardModifier.NoModifier:
+            if Qt.Key.Key_0 <= event.key() <= Qt.Key.Key_5:
+                self.culling_key.emit('rating', event.key() - Qt.Key.Key_0)
+                event.accept()
+                return
+            flags = {Qt.Key.Key_P: 'pick', Qt.Key.Key_X: 'reject', Qt.Key.Key_U: 'none'}
+            if event.key() in flags:
+                self.culling_key.emit('flag', flags[event.key()])
+                event.accept()
+                return
+        super().keyPressEvent(event)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName('agentGallery')
@@ -102,17 +120,25 @@ class PhotoGallery(QListWidget):
     def viewportEvent(self, event):
         result = super().viewportEvent(event)
         if event.type() == QEvent.Type.Resize and hasattr(self, 'layout_timer'):
-            self.layout_timer.start(0)
+            if self.desired_grid_size() != self.gridSize():
+                self.layout_timer.start(0)
         return result
 
-    def reflow(self):
+    def desired_grid_size(self):
         # Reserve a stable gutter even while the as-needed scrollbar is hidden.
         # Using viewport.width() here makes row height toggle scrollbar visibility.
         gutter = self.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent, None, self)
         available = max(1, self.maximumViewportSize().width() - gutter - 8)
-        columns = max(1, available // 220)
+        columns = max(2 if available >= 240 else 1, available // 220)
         width = available // columns
-        size = QSize(width, width + 2 * self.fontMetrics().height() + 12)
+        height = max(
+            140,
+            min(width + 2 * self.fontMetrics().height() + 12, self.maximumViewportSize().height()),
+        )
+        return QSize(width, height)
+
+    def reflow(self):
+        size = self.desired_grid_size()
         if size != self.gridSize():
             self.setGridSize(size)
             self.doItemsLayout()

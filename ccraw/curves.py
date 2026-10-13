@@ -24,12 +24,9 @@ def rgb_table(edits, axis):
     return values
 
 
-def evaluate(points, x, mode='smooth'):
+def spline_parameters(points):
+    """Small analytic spline data shared by the reference and native pixel loop."""
     xp, yp = np.asarray(points, dtype=np.float64).T
-    x = np.asarray(x)
-    if mode == 'linear' or len(points) == 2:
-        return np.interp(x, xp, yp)
-    # Shape-preserving cubic Hermite interpolation: no overshoot between anchors.
     h = np.diff(xp)
     d = np.diff(yp) / h
     slopes = np.zeros_like(xp)
@@ -38,6 +35,16 @@ def evaluate(points, x, mode='smooth'):
         if d[i - 1] * d[i] > 0:
             w1, w2 = 2 * h[i] + h[i - 1], h[i] + 2 * h[i - 1]
             slopes[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i])
+    return xp, yp, slopes
+
+
+def evaluate(points, x, mode='smooth'):
+    xp, yp = np.asarray(points, dtype=np.float64).T
+    x = np.asarray(x)
+    if mode == 'linear' or len(points) == 2:
+        return np.interp(x, xp, yp)
+    xp, yp, slopes = spline_parameters(points)
+    h = np.diff(xp)
     index = np.clip(np.searchsorted(xp, x, side='right') - 1, 0, len(xp) - 2)
     t = np.clip((x - xp[index]) / h[index], 0, 1)
     y = (

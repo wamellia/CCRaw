@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import weakref
+import sys
 from typing import NamedTuple
 import cv2
 import numpy as np
@@ -202,6 +203,37 @@ def _key(*parts):
     ).hexdigest()
 
 
+def _resource_stamp(pro):
+    """Changed imported profiles invalidate cached color stages."""
+    from pathlib import Path
+
+    path = pro.get('profile', {}).get('path')
+    if not path:
+        return None
+    stat = Path(path).stat()
+    return str(Path(path).resolve()), stat.st_size, stat.st_mtime_ns
+
+
+def _operators(working_space):
+    if working_space:
+        from .imaging import wide_color
+
+        return wide_color
+    return sys.modules[__name__]  # Preserve public CPU hooks used by optional backends.
+
+
+def _spatial_professional(pro):
+    """Only the optics that actually change pre-color pixels belong in this key."""
+    optics = pro.get('optics', {})
+    return {
+        k: optics.get(k) for k in ('vignetting', 'midpoint', 'defringe_purple', 'defringe_green')
+    }
+
+
+def _color_professional(pro):
+    return {k: pro.get(k) for k in ('calibration', 'point_color', 'bw_mixer', 'profile')}
+
+
 class _Uncached:
     def bind(self, source, detail_scale):
         pass
@@ -239,6 +271,10 @@ class RenderCache:
         self.clear()
 
     def clear(self):
+        inner = getattr(self, '_wide_cache', None)
+        if inner is not None:
+            inner.clear()
+            del self._wide_cache
         self._source, self._scale = None, None
         self._stages, self._alphas = {}, {}
 
@@ -280,11 +316,11 @@ class RenderCache:
         else:
             self.misses += 1
             value = fn()
+        budget = self.alpha_bytes // 2 if hasattr(self, '_wide_cache') else self.alpha_bytes
+        if value.nbytes > budget:
+            return value  # A single oversized mask must not silently bypass its budget.
         self._alphas[key] = value
-        while (
-            len(self._alphas) > 1
-            and sum(v.nbytes for v in self._alphas.values()) > self.alpha_bytes
-        ):
+        while self._alphas and sum(v.nbytes for v in self._alphas.values()) > budget:
             self._alphas.pop(next(iter(self._alphas)))
         return value
 
@@ -303,10 +339,44 @@ def _mask_bounds(alpha):
 from .imaging.spatial import apply_local as apply_local
 
 
+def _has_luminance(mask):
+    return mask['kind'] == 'luminance' or any(
+        _has_luminance(c['mask']) for c in mask.get('components', [])
+    )
+
+
 def process(
-    source, edits, backend=None, apply_crop=True, detail_scale=1.0, _stream=True, cache=None
+    source,
+    edits,
+    backend=None,
+    apply_crop=True,
+    detail_scale=1.0,
+    _stream=True,
+    cache=None,
+    _working_space=None,
+    check=None,
 ):
+    check = check or (lambda: None)
+    check()
+    if edits.get('process', 1) == 2 and _working_space is None:
+        from .imaging.wide import process as wide_process
+
+        return wide_process(
+            source,
+            edits,
+            apply_crop=apply_crop,
+            detail_scale=detail_scale,
+            cache=cache,
+            check=check,
+        )
     backend = backend or Backend('cpu')
+    ops = _operators(_working_space)
+    from .domain.professional import neutral
+
+    pro = edits.get('professional', {})
+    resource_stamp = _resource_stamp(pro)
+    if not neutral(pro) and _working_space is None:
+        backend = Backend('cpu')
     large_image.validate_size(source.shape)
     if _stream and source.nbytes > large_image.MAP_BYTES:
         # a cached original-resolution render (e.g. 24 MP) keeps its stages when about
@@ -317,7 +387,9 @@ def process(
             and large_image.fits_in_memory(source.shape)
         )
         if not cached:
-            return large_image.process(source, edits, backend, apply_crop, detail_scale, cache)
+            return large_image.process(
+                source, edits, backend, apply_crop, detail_scale, cache, check
+            )
     cache = cache if cache is not None else _UNCACHED
     cache.bind(source, detail_scale)
     a = edits['adjustments']
@@ -338,6 +410,7 @@ def process(
         return repaired if np.all(gain == 1) else repaired * gain
 
     balanced = cache.get('base', base_key, base)
+    check()
     tonal_key = _key(
         base_key,
         {k: a.get(k, 0) for k in TONAL_KEYS},
@@ -353,6 +426,8 @@ def process(
         edits.get('curve_mode', 'linear'),
         edits.get('monochrome', False),
         edits.get('grading', {}),
+        pro,
+        resource_stamp,
         backend.gpu_pointwise,
     )
     if backend.gpu_pointwise and not has_spatial(a):
@@ -362,20 +437,42 @@ def process(
     else:
         basis_key = _key(base_key, {k: a.get(k, 0) for k in ('exposure', 'temperature', 'tint')})
         tonal = cache.get('tonal', tonal_key, lambda: backend.tonal(balanced, a, cache, basis_key))
-        detail_key = _key(tonal_key, {k: a.get(k, 0) for k in SPATIAL_KEYS}, detail_scale)
+        check()
+        spatial_key = _key(tonal_key, {k: a.get(k, 0) for k in SPATIAL_KEYS}, detail_scale)
+        professional_basis = _key(spatial_key, _spatial_professional(pro))
+        detail_key = _key(professional_basis, pro.get('detail'), pro.get('red_eye'))
         if has_spatial(a):
             context = None
             if a.get('dehaze', 0) > 0:
                 atmosphere_key = _key(tonal_key, a.get('denoise', 0), a.get('color_noise', 0))
                 basis = cache.get(
-                    'atmosphere', atmosphere_key, lambda: dehaze_basis(reduce_noise(tonal, a))
+                    'atmosphere', atmosphere_key, lambda: dehaze_basis(ops.reduce_noise(tonal, a))
                 )
                 context = dehaze_context(tonal, a['dehaze'], basis)
             tonal = cache.get(
                 'detail',
-                detail_key,
-                lambda: spatial_details(tonal, a, detail_scale, dehaze_context=context),
+                spatial_key,
+                lambda: ops.spatial_details(
+                    tonal, a, detail_scale, dehaze_context=context, cache=cache, basis_key=tonal_key
+                ),
             )
+        check()
+        if not neutral(pro):
+            from .imaging.professional import apply_spatial
+
+            tonal = cache.get(
+                'professional_detail',
+                detail_key,
+                lambda: apply_spatial(
+                    tonal,
+                    pro,
+                    detail_scale,
+                    _working_space or 'sRGB',
+                    cache=cache,
+                    basis_key=spatial_key,
+                ),
+            )
+        check()
         if not backend.gpu_pointwise:
             chroma_key = _key(
                 detail_key,
@@ -386,43 +483,100 @@ def process(
                 edits.get('tone_curve'),
                 edits.get('curve_mode', 'linear'),
                 edits.get('monochrome', False),
+                _color_professional(pro),
+                resource_stamp,
             )
-            chroma = cache.get('chroma', chroma_key, lambda: color_base(tonal, edits))
+            point_basis = _key(
+                detail_key,
+                a.get('saturation', 0),
+                a.get('vibrance', 0),
+                edits['hsl'],
+                edits['curves'],
+                edits.get('tone_curve'),
+                edits.get('curve_mode', 'linear'),
+            )
+            chroma = cache.get(
+                'chroma',
+                chroma_key,
+                lambda: ops.color_base(
+                    tonal, edits, cache=cache, basis_key=point_basis, input_key=detail_key
+                ),
+            )
             x = cache.get(
                 'global',
                 _key(chroma_key, edits.get('grading', {})),
-                lambda: color_grade(chroma, edits.get('grading', {})),
+                lambda: ops.color_grade(chroma, edits.get('grading', {})),
             )
         else:
             x = cache.get(
                 'global', _key(detail_key, color_key), lambda: backend.color(tonal, edits)
             )
     masks = [m for m in edits['masks'] if m['enabled'] and any(m['adjustments'].values())]
+    check()
     if masks:
         reference_key = _key(develop_settings)
         mask_reference = (
             cache.get(
                 'reference',
                 reference_key,
-                lambda: np.clip(to_srgb(develop.apply(source, develop_settings)), 0, 1),
+                lambda: np.clip(
+                    backend.reference(develop.apply(source, develop_settings))
+                    if hasattr(backend, 'reference')
+                    else to_srgb(develop.apply(source, develop_settings)),
+                    0,
+                    1,
+                ),
             )
-            if any(m['kind'] == 'luminance' for m in masks)
+            if any(_has_luminance(m) for m in masks)
             else None
         )
         x = x.copy()  # stage results are shared with the cache
         for mask in masks:
+            check()
             geometry = {
                 k: v for k, v in mask.items() if k not in ('adjustments', 'name', 'enabled')
             }
-            alpha_key = _key(
-                geometry, x.shape, reference_key if mask['kind'] == 'luminance' else ''
-            )
+            alpha_key = _key(geometry, x.shape, reference_key if _has_luminance(mask) else '')
             alpha = cache.alpha(alpha_key, lambda: mask_alpha(mask, x.shape, mask_reference))
             apply_local(x, alpha, mask['adjustments'], backend, detail_scale)
-    x = finishing(x, edits.get('effects', {}), edits.get('crop'), cache=cache)
+    x = ops.finishing(x, edits.get('effects', {}), edits.get('crop'), cache=cache)
+    check()
+    if not neutral(pro):
+        from .imaging.professional import apply_geometry
+
+        x = apply_geometry(x, pro, cache=cache)
     if apply_crop:
         x = crop_rotate(x, edits)
-    return np.ascontiguousarray(np.clip(x, 0, 1), dtype=np.float32)
+    check()
+    return np.ascontiguousarray(x if _working_space else np.clip(x, 0, 1), dtype=np.float32)
+
+
+def render_output(source, edits, color_space='sRGB', backend=None, intent=None, **kwargs):
+    """Render directly into a named encoded output space; quantization belongs to the writer."""
+    from .imaging import colorspaces as cs
+
+    if edits.get('process', 1) == 2:
+        from .imaging.wide import process as wide_process
+
+        rgb = wide_process(
+            source,
+            edits,
+            output_space='Rec.2020' if intent else color_space,
+            apply_crop=kwargs.get('apply_crop', True),
+            detail_scale=kwargs.get('detail_scale', 1),
+            cache=kwargs.get('cache'),
+        )
+        source_space = 'Rec.2020'
+    else:
+        rgb = process(source, edits, backend, **kwargs)
+        source_space = 'sRGB'
+    if intent:
+        from .imaging.cms import transform_icc
+
+        return transform_icc(
+            rgb, cs.profile_bytes(source_space), cs.profile_bytes(color_space), intent=intent
+        )
+    return rgb if edits.get('process', 1) == 2 else cs.convert(rgb, source_space, color_space)
 
 
 def _gain(edits):
@@ -436,6 +590,11 @@ def dehaze_context_for(source, edits, backend=None, detail_scale=1.0):
     a = edits['adjustments']
     if a.get('dehaze', 0) <= 0:
         return None
+    if edits.get('process', 1) == 2:
+        from .imaging.wide import _prepare, WideBackend
+
+        source, edits, _ = _prepare(source, edits, detail_scale, None)
+        backend = WideBackend()
     backend = backend or Backend('cpu')
     gain = _gain(edits)
     balanced = develop.apply(
@@ -444,7 +603,8 @@ def dehaze_context_for(source, edits, backend=None, detail_scale=1.0):
     if not np.all(gain == 1):
         balanced = balanced * gain
     tonal = np.ascontiguousarray(backend.tonal(balanced, a), dtype=np.float32)
-    return dehaze_context(reduce_noise(tonal, a), a['dehaze'])
+    ops = _operators(getattr(backend, 'working_space', None))
+    return dehaze_context(ops.reduce_noise(tonal, a), a['dehaze'])
 
 
 def process_region(
@@ -456,6 +616,7 @@ def process_region(
     dehaze_context=None,
     check=None,
     cache=None,
+    _working_space=None,
 ):
     """``process(source, edits, apply_crop=False)[y0:y1, x0:x1]`` for ``rect = (x0, y0, x1, y1)``.
 
@@ -466,13 +627,49 @@ def process_region(
     """
     backend = backend or Backend('cpu')
     check = check or (lambda: None)
+    if edits.get('process', 1) == 2 and _working_space is None:
+        from .imaging.wide import process_region as wide_region
+
+        return wide_region(source, edits, rect, detail_scale, cache, check)
+    ops = _operators(_working_space)
     h, w = source.shape[:2]
+    from .domain.professional import neutral
+    from .imaging.professional import geometry_neutral, apply_spatial
+
+    pro = edits.get('professional', {})
+    resource_stamp = _resource_stamp(pro)
+    advanced = not neutral(pro)
+    frame_tools = (
+        not geometry_neutral(pro)
+        or pro.get('optics', {}).get('vignetting', 0)
+        or pro.get('red_eye')
+        or any(m['enabled'] and m['adjustments'].get('dehaze', 0) > 0 for m in edits['masks'])
+    )
+    if frame_tools:
+        check()
+        frame = process(
+            source,
+            edits,
+            backend,
+            apply_crop=False,
+            detail_scale=detail_scale,
+            cache=cache,
+            _working_space=_working_space,
+            check=check,
+        )
+        check()
+        x0, y0, x1, y1 = rect or (0, 0, w, h)
+        return np.ascontiguousarray(frame[y0:y1, x0:x1])
     target = Area(w, h, *(rect or (0, 0, w, h)))
     a = edits['adjustments']
+    if advanced and _working_space is None:
+        backend = Backend('cpu')
     masks = [m for m in edits['masks'] if m['enabled'] and any(m['adjustments'].values())]
     margin = spatial_margin(a, (h, w), detail_scale) + max(
         [spatial_margin(m['adjustments'], (h, w), detail_scale) for m in masks], default=0
     )
+    if advanced:
+        margin += int(np.ceil(36 * detail_scale)) + 8
     area = target.grow(margin)
     cache = cache if cache is not None else _UNCACHED
     cache.bind(source, detail_scale)
@@ -510,7 +707,14 @@ def process_region(
             for v in dehaze_context
         ]
     )
-    detail_key = _key(tonal_key, {k: a.get(k, 0) for k in SPATIAL_KEYS}, detail_scale, context_key)
+    professional_basis = _key(
+        tonal_key,
+        {k: a.get(k, 0) for k in SPATIAL_KEYS},
+        detail_scale,
+        context_key,
+        _spatial_professional(pro),
+    )
+    detail_key = _key(professional_basis, pro.get('detail'))
     color_key = _key(
         detail_key,
         a.get('saturation', 0),
@@ -520,6 +724,8 @@ def process_region(
         edits.get('tone_curve'),
         edits.get('curve_mode', 'linear'),
         edits.get('monochrome', False),
+        _color_professional(pro),
+        resource_stamp,
     )
     check()
     if backend.gpu_pointwise and not has_spatial(a):
@@ -535,16 +741,56 @@ def process_region(
             x = cache.get(
                 'detail',
                 detail_key,
-                lambda: spatial_details(tonal, a, detail_scale, (h, w), dehaze_context, area),
+                lambda: ops.spatial_details(
+                    tonal,
+                    a,
+                    detail_scale,
+                    (h, w),
+                    dehaze_context,
+                    area,
+                    cache=cache,
+                    basis_key=_key(tonal_key, context_key),
+                ),
             )
         check()
+        if advanced:
+            detail_input = x
+            x = cache.get(
+                'professional_detail',
+                detail_key,
+                lambda: apply_spatial(
+                    detail_input,
+                    pro,
+                    detail_scale,
+                    _working_space or 'sRGB',
+                    cache=cache,
+                    basis_key=_key(
+                        tonal_key, {k: a.get(k, 0) for k in SPATIAL_KEYS}, detail_scale, context_key
+                    ),
+                ),
+            )
         tonal = x
         if not backend.gpu_pointwise:
-            chroma = cache.get('chroma', color_key, lambda: color_base(tonal, edits))
+            point_basis = _key(
+                detail_key,
+                a.get('saturation', 0),
+                a.get('vibrance', 0),
+                edits['hsl'],
+                edits['curves'],
+                edits.get('tone_curve'),
+                edits.get('curve_mode', 'linear'),
+            )
+            chroma = cache.get(
+                'chroma',
+                color_key,
+                lambda: ops.color_base(
+                    tonal, edits, cache=cache, basis_key=point_basis, input_key=detail_key
+                ),
+            )
             x = cache.get(
                 'global',
                 _key(color_key, edits.get('grading')),
-                lambda: color_grade(chroma, edits.get('grading', {})),
+                lambda: ops.color_grade(chroma, edits.get('grading', {})),
             )
         else:
             x = cache.get(
@@ -553,13 +799,13 @@ def process_region(
     if masks:
         reference = (
             np.clip(
-                to_srgb(
+                (backend.reference if hasattr(backend, 'reference') else to_srgb)(
                     develop.apply(source[area.y0 : area.y1, area.x0 : area.x1], develop_settings)
                 ),
                 0,
                 1,
             )
-            if any(m['kind'] == 'luminance' for m in masks)
+            if any(_has_luminance(m) for m in masks)
             else None
         )
         x = x.copy()
@@ -568,13 +814,14 @@ def process_region(
             geometry = {
                 k: v for k, v in mask.items() if k not in ('adjustments', 'name', 'enabled')
             }
-            alpha_key = _key(
-                geometry, area, develop_settings if mask['kind'] == 'luminance' else None
-            )
+            alpha_key = _key(geometry, area, develop_settings if _has_luminance(mask) else None)
             alpha = cache.alpha(alpha_key, lambda: mask_alpha(mask, (h, w), reference, area))
             apply_local(x, alpha, mask['adjustments'], backend, detail_scale, (h, w))
-    x = finishing(x, edits.get('effects', {}), edits.get('crop'), area, cache)
-    return np.ascontiguousarray(np.clip(x[area.inner(target)], 0, 1), dtype=np.float32)
+    x = ops.finishing(x, edits.get('effects', {}), edits.get('crop'), area, cache)
+    cropped = x[area.inner(target)]
+    return np.ascontiguousarray(
+        cropped if _working_space else np.clip(cropped, 0, 1), dtype=np.float32
+    )
 
 
 def crop_bounds(edits, width, height):

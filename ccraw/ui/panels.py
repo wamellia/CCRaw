@@ -129,8 +129,8 @@ class PanelsMixin:
         right.setMinimumWidth(380)
         right.setMaximumWidth(420)
         r = QVBoxLayout(right)
-        r.setContentsMargins(16, 16, 16, 12)
-        r.setSpacing(8)
+        r.setContentsMargins(12, 8, 12, 4)
+        r.setSpacing(6)
         heading_row = QHBoxLayout()
         heading_row.addWidget(heading('调整'), 1)
         self.histogram_button = self.button('直方图', lambda: None)
@@ -167,8 +167,9 @@ class PanelsMixin:
         self.tool_select.setAccessibleName('调整工具')
         self.tool_select.hide()
         self.tool_grid = QGridLayout()
-        self.tool_grid.setSpacing(6)
+        self.tool_grid.setSpacing(4)
         r.addLayout(self.tool_grid)
+        r.addWidget(self.tool_select)
         r.addWidget(self.tabs, 1)
         self.build_basic()
         self.build_color()
@@ -179,6 +180,7 @@ class PanelsMixin:
         self.build_grading()
         self.build_effects()
         self.build_retouch()
+        self.build_professional()
         self.tool_select.addItems([self.tabs.tabText(i) for i in range(self.tabs.count())])
         self.tool_select.currentIndexChanged.connect(self.tabs.setCurrentIndex)
         self.tabs.currentChanged.connect(self.tool_select.setCurrentIndex)
@@ -219,6 +221,7 @@ class PanelsMixin:
             'grading',
             'effects',
             'retouch',
+            'detail',
         ]
         self.tool_buttons = []
         for index, symbol in enumerate(symbols):
@@ -228,12 +231,12 @@ class PanelsMixin:
             button.setAccessibleName(button.text())
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             button.setCheckable(True)
-            button.setMinimumHeight(38)
+            button.setMinimumHeight(36)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             set_icon(button, symbol)
             self.tool_group.addButton(button, index)
             self.tool_buttons.append(button)
-        for position, index in enumerate((0, 1, 3, 4, 5, 6, 7, 8, 2)):
+        for position, index in enumerate((0, 1, 3, 4, 5, 6, 7, 8, 9, 2)):
             self.tool_grid.addWidget(self.tool_buttons[index], position // 3, position % 3)
         self.tool_group.idClicked.connect(self.tabs.setCurrentIndex)
         self.tabs.currentChanged.connect(lambda index: self.tool_buttons[index].setChecked(True))
@@ -247,6 +250,55 @@ class PanelsMixin:
                 self._compact_inspector = compact
                 self.histogram_button.setChecked(not compact)
                 self.exposure_curve.setFixedHeight(120 if compact else 165)
+            short = self.height() < 760
+            # Keep useful editing space on 1080p at 150% and smaller screens.
+            # The same named tools remain available in a single selection row.
+            self.tool_select.setVisible(short)
+            for button in self.tool_buttons:
+                button.setVisible(not short)
+            self.canvas.setMinimumHeight(180 if short else 380)
+            from PySide6.QtCore import QSize
+
+            self.filmstrip.setIconSize(QSize(118, 52 if short else 76))
+            self.filmstrip.setGridSize(QSize(144, 82 if short else 102))
+            self.filmstrip.setFixedHeight(92 if short else 112)
+
+    def build_professional(self):
+        from .professional_panel import ProfessionalPanel
+
+        # ProfessionalPanel already owns scrollable subpages. A second outer
+        # scroll area would squeeze its controls to one header in short windows.
+        from .components import ToolPage
+
+        page = ToolPage()
+        l = QVBoxLayout(page.widget())
+        l.setContentsMargins(0, 4, 0, 4)
+        self.tabs.addTab(page, '专业')
+        self.process_select = QComboBox()
+        self.process_select.addItems(['兼容显影 · sRGB', '宽色域显影 · Rec.2020'])
+        self.process_select.currentIndexChanged.connect(self.process_changed)
+        l.addWidget(self.process_select)
+        self.professional_editor = ProfessionalPanel(self)
+        self.professional_editor.changed.connect(self.professional_changed)
+        self.professional_editor.committed.connect(self.commit)
+        self.professional_editor.sampleRequested.connect(
+            lambda: self.professional_sampling('point')
+        )
+        self.professional_editor.positionRequested.connect(
+            lambda: self.professional_sampling('eye')
+        )
+        self.professional_editor.lensfunRequested.connect(self.professional_lensfun)
+        self.professional_editor.bwAutoRequested.connect(self.professional_bw_auto)
+        self.professional_editor.bwTargetRequested.connect(self.update_tool)
+        self.professional_editor.rangeRequested.connect(self.changed)
+        self.professional_editor.constrainRequested.connect(self.professional_constrain)
+        self.professional_editor.tabs.currentChanged.connect(lambda _: self.changed())
+        self.professional_editor.tabs.currentChanged.connect(self.update_tool)
+        self.professional_editor.geometry_grid.toggled.connect(self.update_tool)
+        self.canvas.color_sampled.connect(self.professional_sample)
+        self.canvas.target_started.connect(self.professional_bw_start)
+        self.canvas.target_moved.connect(self.professional_bw_move)
+        l.addWidget(self.professional_editor, 1)
 
     def panel(self, title):
         scroll = QScrollArea()
@@ -417,6 +469,7 @@ class PanelsMixin:
         self.mask_list.setFixedHeight(105)
         self.mask_list.currentRowChanged.connect(self.select_mask)
         l.addWidget(self.mask_list)
+        l.addWidget(self.button('添加 / 减去 / 交集…', self.edit_mask_components))
         row = QHBoxLayout()
         self.overlay_check = QCheckBox('显示范围')
         self.overlay_check.setChecked(True)

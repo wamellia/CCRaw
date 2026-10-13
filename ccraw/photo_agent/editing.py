@@ -9,6 +9,7 @@ import threading
 from .. import engine, model, nl_edit, image_generation as generation
 from .models import digest
 from .store import identifier
+from .controls import prepare
 
 
 def check_original(project, photo_id, cancel=None):
@@ -18,8 +19,8 @@ def check_original(project, photo_id, cancel=None):
     return photo
 
 
-def diagnose(project, photo_id):
-    photo = check_original(project, photo_id)
+def diagnose(project, photo_id, cancel=None):
+    photo = check_original(project, photo_id, cancel)
     facts = photo['facts']
     return dict(
         photo_id=photo_id,
@@ -30,8 +31,17 @@ def diagnose(project, photo_id):
     )
 
 
-def propose_local(project, photo_id, patch=None):
-    diagnostic = diagnose(project, photo_id)
+def propose_local(project, photo_id, patch=None, cancel=None):
+    payloads = local_payloads(project, photo_id, patch, cancel)
+    if cancel is not None and cancel.is_set():
+        raise InterruptedError('方案创建已取消。')
+    result = project.replace_proposals(photo_id, 'local', payloads)
+    project.event('edit.proposed', {'photo_id': photo_id, 'count': len(result), 'kind': 'local'})
+    return result
+
+
+def local_payloads(project, photo_id, patch=None, cancel=None):
+    diagnostic = diagnose(project, photo_id, cancel)
     photo = project.photo(photo_id)
     choices = [
         ('自然增强', dict(adjustments={'contrast': 8, 'vibrance': 12, 'shadows': 10})),
@@ -47,12 +57,10 @@ def propose_local(project, photo_id, patch=None):
     base = project.preferences().get('recipe:' + photo_id, model.recipe())
     payloads = []
     for label, change in choices[:3]:
-        plan = nl_edit.plan(model.validate(base), change)
-        if plan.regions:
-            raise ValueError('自动选区请在照片编辑模式完成，或提供完整已有蒙版配方。')
+        recipe = prepare(base, change)
         payload = dict(
             label=label,
-            recipe=model.validate(plan.target),
+            recipe=recipe,
             diagnostic=diagnostic,
             source_sha256=photo['sha'],
             engine='CCRaw Photo Engine',
@@ -60,9 +68,111 @@ def propose_local(project, photo_id, patch=None):
             cost='本地处理',
         )
         payloads.append(payload)
-    result = project.replace_proposals(photo_id, 'local', payloads)
-    project.event('edit.proposed', {'photo_id': photo_id, 'count': len(result), 'kind': 'local'})
+    return payloads
+
+
+def propose_batch(project, photo_ids, patch=None, cancel=None):
+    if (
+        not isinstance(photo_ids, (list, tuple))
+        or not 1 <= len(photo_ids) <= 30
+        or len(set(photo_ids)) != len(photo_ids)
+    ):
+        raise ValueError('一次需要 1–30 张不同的照片。')
+    cancel = cancel or threading.Event()
+    batches = []
+    for photo_id in photo_ids:
+        if cancel.is_set():
+            raise InterruptedError('方案创建已取消。')
+        batches.append((photo_id, 'local', local_payloads(project, photo_id, patch, cancel)))
+    if cancel.is_set():
+        raise InterruptedError('方案创建已取消。')
+    result = project.replace_proposal_batches(batches)
+    project.event('edit.batch_proposed', {'photo_ids': list(photo_ids), 'count': len(result)})
     return result
+
+
+def preview_local(project, proposal_id, max_edge=1024, cancel=None):
+    from pathlib import Path
+    from PIL import Image
+    import numpy as np
+
+    cancel = cancel or threading.Event()
+    if type(max_edge) is not int or not 256 <= max_edge <= 2048:
+        raise ValueError('预览最长边需要 256–2048 像素。')
+    if cancel.is_set():
+        raise InterruptedError('预览已取消。')
+    proposal = project.get_proposal(proposal_id)
+    if proposal['kind'] != 'local' or proposal['status'] != 'pending':
+        raise ValueError('请选择待确认的本地方案。')
+    photo = check_original(project, proposal['photo_id'], cancel)
+    if photo['sha'] != proposal['payload']['source_sha256']:
+        raise ValueError('原片已变化，请重新创建方案。')
+    base = model.validate(project.preferences().get('recipe:' + photo['id'], model.recipe()))
+    target = model.validate(proposal['payload']['recipe'])
+    key = hashlib.sha256(
+        json.dumps([photo['sha'], base, target, max_edge], sort_keys=True).encode()
+    ).hexdigest()
+    folder = project.directory('previews')
+    paths = [folder / f'edit-preview-v1-{key}-{name}.jpg' for name in ('before', 'after')]
+    for path in paths:
+        if path.is_symlink() or path.resolve().parent != folder:
+            raise ValueError('预览路径无效。')
+
+    def valid_image(path):
+        if not path.is_file() or path.stat().st_size > 8 * 1024 * 1024:
+            return False
+        try:
+            with Image.open(path) as image:
+                if image.format != 'JPEG' or max(image.size) > max_edge:
+                    return False
+                image.load()
+            return True
+        except (OSError, ValueError):
+            return False
+
+    cached = all(valid_image(p) for p in paths)
+    if not cached:
+        source, info = engine.load_image(photo['path'], max_edge, develop_reference=True)
+        scale = max(source.shape[1] / info['width'], source.shape[0] / info['height'])
+        backend = engine.Backend('cpu')
+        cache = engine.RenderCache(max_bytes=128 * 1024 * 1024, alpha_bytes=32 * 1024 * 1024)
+        images = []
+        for recipe in (base, target):
+            if cancel.is_set():
+                raise InterruptedError('预览已取消。')
+            if (
+                info.get('raw')
+                and recipe['develop']['mode'] == 'camera'
+                and not recipe['develop'].get('curve')
+            ):
+                recipe['develop'].update(info.get('develop', {}))
+            rgb = engine.process(source, recipe, backend, detail_scale=scale, cache=cache)
+            image = Image.fromarray((np.clip(rgb, 0, 1) * 255 + 0.5).astype(np.uint8))
+            image.thumbnail((max_edge, max_edge), Image.Resampling.LANCZOS)
+            images.append(image)
+        check_original(project, photo['id'], cancel)
+        if project.get_proposal(proposal_id)['status'] != 'pending' or cancel.is_set():
+            raise InterruptedError('方案已失效或预览已取消。')
+        for path, image in zip(paths, images):
+            temporary = folder / (identifier() + '.tmp')
+            try:
+                with temporary.open('xb') as stream:
+                    image.save(stream, format='JPEG', quality=92)
+                project.directory('previews')
+                temporary.replace(path)
+            finally:
+                temporary.unlink(missing_ok=True)
+    if project.get_proposal(proposal_id)['status'] != 'pending' or cancel.is_set():
+        raise InterruptedError('方案已失效或预览已取消。')
+    return dict(
+        photo_id=photo['id'],
+        proposal_id=proposal_id,
+        before=Path(paths[0]).name,
+        after=Path(paths[1]).name,
+        cached=cached,
+        max_edge=max_edge,
+        status='preview only; proposal remains pending; full resolution on UI approval',
+    )
 
 
 def apply_local(project, proposal_id, cancel=None):

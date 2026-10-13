@@ -1,8 +1,10 @@
-# CCRaw
+# CCRaw-Pro v1.1
 
 [简体中文](README.md) | English
 
-**An open-source photo editor and Photo Agent for Windows.**
+**An open-source professional photo editor and Photo Agent for Windows.**
+
+v1.1 is CCRaw's professional editing upgrade, bringing floating-point wide-gamut processing and color management, professional editing tools, a complete culling and catalog workflow, unified settings, and faster loading and live previews that retain the working preview resolution. The release is named **CCRaw-Pro v1.1**, with software version **1.1.0**. Existing project formats, Photo Agent, smart watermarks and image-generation workflows remain compatible.
 
 CCRaw brings photo adjustments, local editing, photo selection and AI image creation into one workspace. Import an original image, adjust light and color with live previews, compare results, save your project and export a separate finished image. Originals stay intact. Adjustments can be undone or saved as presets for other photos.
 
@@ -24,7 +26,8 @@ Create a `.ccrawagent` project and import photos or folders to begin scanning. T
 |---|---|
 | Organize | Exact duplicate groups based on SHA-256, similar-image candidates, exposure and sharpness hints, events grouped by capture time, and anonymous person clusters |
 | Find photos | Constrained queries from natural language, combining capture dates, filenames, tags, local CLIP vectors, person clusters and quality signals |
-| Edit | Local diagnosis of a selected photo with up to three proposals; natural language can create additional parameter proposals |
+| Edit | Local diagnosis with up to three proposals per selected photo; natural-language color adjustments, cropping, rotation, curves and geometric masks, with before/after previews before applying |
+| Adjust multiple photos | Create proposals for 1–30 selected photos while preserving each photo's untouched settings; preview and approve them individually |
 | Continue editing | Open the existing photo editor with its full toolset and save adjustments back to the Agent project |
 | External editing | Review the provider, model, images to upload, prompt and cost before execution; results are saved as separate derived versions |
 | Execution history | Persisted conversations, tasks and tool calls; viewing history does not execute requests again |
@@ -37,6 +40,12 @@ Without a configured LLM, you can still scan photos, review organization suggest
 
 Person detection and clustering provide candidate signals. The number of people in an image is unknown by default and can be verified through **Annotate People / Tags** (标注人数 / 标签). Strict person-count queries exclude photos with unknown counts. Events use EXIF capture times; missing capture times are not replaced with file modification times. For complex Chinese searches, use an Agent conversation to translate the request into search filters and an English semantic query. See the [Photo Agent guide](docs/photo-agent.md) for feature boundaries and project storage details.
 
+Select a proposal and click **Preview Proposal** (预览方案) to compare the current adjustments with the proposed result. Previewing does not create a derived version. Try “Set exposure to 0.3 stops for all selected photos while keeping their individual crops” or “Crop the selected photo to its right half and show a preview first.” Parameter names, ranges and coordinates are validated; unsupported requests produce an error.
+
+![CCRaw Agent before/after proposal preview](docs/screenshots/agent-preview.webp)
+
+External tool-calling agents can connect over standard stdio MCP to the same photo tools, discover controls, search the project, create proposals and receive before/after preview images. Start MCP from Python source and explicitly authorize editing targets by photo ID. Derived versions still require approval in the app. See [Agent tools and MCP](docs/agent-tools.md#english-quick-start) for setup and examples.
+
 ## From original to finished image
 
 ### Live previews while you adjust
@@ -44,6 +53,8 @@ Person detection and clustering provide candidate signals. The number of people 
 The image updates as you drag sliders, edit curves or move the color-grading wheels. Fit the image to the window to review the overall result, or switch to 100% to inspect original-resolution pixels in the visible area. Use the original view and before/after comparison to check your adjustments.
 
 Image processing runs separately from interface interaction, and consecutive inputs are coalesced. A CPU supports everyday editing; DirectML, CUDA or model inference acceleration can be enabled depending on your environment. Actual responsiveness depends on image dimensions, adjustment types and hardware.
+
+Professional controls and composite masks preview changes as you make them. Confirm a composite-mask edit to keep it as one undo step, or cancel to restore the previous state. Preview requests are scheduled at up to 60 Hz without reducing the working preview resolution during a drag; the 100% view updates visible original pixels. Actual image refresh rates depend on processing time. Decoded photos, curve interpolation, filter inputs and color stages reuse bounded caches to avoid repeated work.
 
 ### Editing tools in one place
 
@@ -95,7 +106,17 @@ In the generation panel's **Settings** (设置), enter the endpoint, model and A
 
 ## Choose your appearance
 
-Light mode is the default. You can also switch to a VS Code-style dark gray interface through **View → Appearance** (查看 → 外观). Changing the theme affects the interface without changing photo adjustments or output colors.
+Light mode is the default. Appearance and Settings are available in the launcher, Photo Agent and editor. Choose light, VS Code-style dark gray, or the Windows system theme, and switch between English and Chinese. Ctrl+, opens shared settings. Themes do not change photo adjustments or output colors.
+
+## Professional editing and catalog management
+
+The Professional page adds optical correction, perspective and flips, RGB calibration, detailed sharpening and noise reduction, an eight-color monochrome mixer, point color, LUT/ICC/DCP profiles, and red-eye correction. Point color has a selection overlay; monochrome supports an automatic starting mix and on-image dragging. Masks support add/subtract/intersect components, and synchronization transfers selected parameter groups.
+
+The wide-gamut renderer uses floating-point Rec.2020, preserving signed and above-white intermediate samples. Export supports sRGB, Adobe RGB, Display P3, ProPhoto RGB and Rec.2020 with embedded ICC, plus 16-bit TIFF/PNG and flattened RGB PSD. Monitor ICC, soft proofing and gamut warnings affect presentation only. Export presets, metadata policies, sharpening, external-editor copies and XMP complete the output workflow. Support boundaries are described in the [editing guide](docs/editing.md).
+
+Photo Agent and Quick Edit's Manage Albums share ratings, flags, color labels, albums and folders, smart albums, saved filters, comparison and survey views, stacks and virtual copies. Batch metadata, anonymous face-cluster corrections, relinking, offline proxies and project trash are available through the management view. See the [catalog guide](docs/catalog.md).
+
+Shared settings cover performance, cache cleanup, import defaults, existing provider configurations and autosave recovery. Shareable settings omit credentials; originals remain unchanged. See the [settings guide](docs/settings.md). Detailed guides are currently in Chinese; application labels can be switched to English.
 
 ![CCRaw editor in light mode](docs/screenshots/editor-light.webp)
 

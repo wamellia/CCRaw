@@ -1,7 +1,24 @@
 from __future__ import annotations
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel, QStatusBar, QSizePolicy
+from PySide6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QStatusBar, QSizePolicy
 from .. import compute
+
+
+class ToolPage(QWidget):
+    """Non-scrolling page for tools whose own subpages already scroll.
+
+    Keep the same content accessor as QScrollArea for shared workflow states.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self._content = QWidget()
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(self._content)
+
+    def widget(self):
+        return self._content
 
 
 class ModeBadge(QLabel):

@@ -660,14 +660,9 @@ class NaturalLanguageMixin:
         self.nl_examples.setCurrentIndex(0)
 
     def nl_configure(self):
-        dialog = SettingsDialog(self, self.nl_settings)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            self.nl_settings = dialog.values()
-            try:
-                nl_edit.save_settings(self.nl_settings)
-            except OSError as error:
-                self.error('无法保存模型设置：' + str(error))
-            self.nl_update_service()
+        from .ui.settings_dialog import show_settings
+
+        return show_settings(self, 'models')
 
     # ----------------------------------------------------------------- requests
 

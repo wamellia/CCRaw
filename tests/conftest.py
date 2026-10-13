@@ -27,3 +27,30 @@ def pytest_collection_modifyitems(items):
     for item in items:
         if item.originalname in RUNTIME_TESTS:
             item.add_marker(pytest.mark.runtime_assets)
+
+
+@pytest.fixture(autouse=True)
+def release_closed_test_windows():
+    """Closed windows from one test must not keep polling in following tests."""
+    from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    instance = QApplication.instance()
+    before = {id(w) for w in instance.topLevelWidgets()} if instance else set()
+    yield
+    instance = QApplication.instance()
+    if instance is None:
+        return
+    for widget in instance.topLevelWidgets():
+        if id(widget) in before or not widget.isHidden():
+            continue
+        if (
+            getattr(widget, 'jobs', None)
+            or getattr(widget, 'worker', None)
+            or getattr(widget, '_model_busy', False)
+        ):
+            continue
+        # WorkState flags alone also occur in synthetic test windows without
+        # real jobs. Retaining those leaves a phantom global device blocker.
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)

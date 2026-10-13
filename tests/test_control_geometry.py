@@ -34,7 +34,7 @@ def test_tools_are_visible_and_clickable_at_minimum_window_size(window, app, mod
         apply_theme(app, mode)
         w.resize(1180, 780)
         app.processEvents()
-        assert len(w.tool_buttons) == w.tabs.count() == 9
+        assert len(w.tool_buttons) == w.tabs.count() == 10
         for index, button in enumerate(w.tool_buttons):
             assert button.isVisible() and button.text()
             assert button.width() >= button.minimumSizeHint().width()

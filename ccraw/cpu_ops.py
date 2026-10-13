@@ -6,6 +6,8 @@ are used in interactive, region and export rendering.
 """
 
 import numpy as np
+from concurrent.futures import ThreadPoolExecutor
+from collections import deque
 from . import performance, native_kernels
 
 try:
@@ -22,6 +24,63 @@ SLOPE = np.float32(12.92)
 GAIN = np.float32(1.055)
 POWER = np.float32(1 / 2.4)
 OFFSET = np.float32(0.055)
+_ufunc_pool = ThreadPoolExecutor(
+    max_workers=min(8, performance.THREADS), thread_name_prefix='ccraw-math'
+)
+
+
+def _elementwise(x, operation):
+    """Partition exact NumPy ufuncs, keeping SIMD boundaries aligned to 64 values."""
+    if x.dtype != np.float32 or not x.flags.c_contiguous or x.size < 262144:
+        return operation(x)
+    out = np.empty_like(x)
+    source, target = x.ravel(), out.ravel()
+    workers = min(8, performance.THREADS)
+    chunk = max(64, ((len(source) + workers * 64 - 1) // (workers * 64)) * 64)
+
+    def run(start):
+        operation(source[start : start + chunk], out=target[start : start + chunk])
+
+    list(_ufunc_pool.map(run, range(0, len(source), chunk)))
+    return out
+
+
+def cbrt(x):
+    return _elementwise(x, np.cbrt)
+
+
+def cube(x):
+    def power(block, out=None):
+        return np.power(block, 3, out=out)
+
+    return _elementwise(x, power)
+
+
+def map_blocks(fn, blocks):
+    """At most eight disjoint decode tiles in flight; errors drain native work."""
+    iterator = iter(blocks)
+    pending = deque()
+    for _ in range(min(8, performance.THREADS)):
+        item = next(iterator, None)
+        if item is None:
+            break
+        pending.append(_ufunc_pool.submit(fn, item))
+    try:
+        while pending:
+            pending.popleft().result()
+            item = next(iterator, None)
+            if item is not None:
+                pending.append(_ufunc_pool.submit(fn, item))
+    except BaseException:
+        for future in pending:
+            future.cancel()
+        for future in pending:
+            if not future.cancelled():
+                try:
+                    future.result()
+                except BaseException:
+                    pass
+        raise
 
 
 def srgb(rgb, contrast=0, nonnegative=False):
@@ -74,6 +133,9 @@ def tonal(image, a, cache=None, basis_key=None):
     if any(a[k] for k in ('shadows', 'highlights', 'blacks', 'whites')):
 
         def weights():
+            native = native_kernels.tone_weights(x)
+            if native is not None:
+                return native
             r, g, b = x[..., 0], x[..., 1], x[..., 2]
             cr, cg, cb = np.float32(0.2126), np.float32(0.7152), np.float32(0.0722)
             lum = ne.evaluate('r * cr + g * cg + b * cb', local_dict=locals())
@@ -112,6 +174,9 @@ def tonal(image, a, cache=None, basis_key=None):
 
 
 def rgb8(rgb):
+    result = native_kernels.rgb8(rgb)
+    if result is not None:
+        return result
     if ne is None:
         return np.clip(rgb * 255, 0, 255).astype(np.uint8)
     factor, low, high = np.float32(255), np.float32(0), np.float32(255)

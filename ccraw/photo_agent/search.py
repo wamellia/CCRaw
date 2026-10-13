@@ -20,6 +20,18 @@ FIELDS = {
     'tags',
     'photo_ids',
     'limit',
+    'rating',
+    'flag',
+    'color_label',
+    'camera',
+    'lens',
+    'iso',
+    'format',
+    'edited',
+    'rules',
+    'album',
+    'sort',
+    'descending',
 }
 
 
@@ -27,6 +39,22 @@ def validate_query(value):
     if not isinstance(value, dict) or set(value) - FIELDS:
         raise ValueError('查询包含不支持的字段。')
     query = dict(value)
+    from ..catalog.rules import compile_rules
+
+    constraints = []
+    for field in ('rating', 'flag', 'color_label', 'camera', 'lens', 'iso', 'format', 'edited'):
+        if field in query:
+            constraints.append({'field': field, 'op': 'eq', 'value': query[field]})
+    if query.get('rules') is not None:
+        constraints.append(query['rules'])
+    if 'album' in query and (not isinstance(query['album'], str) or len(query['album']) != 32):
+        raise ValueError('相册引用无效。')
+    compile_rules({'all': constraints}, lambda _: ('1', []))
+    if (
+        query.get('sort', 'import') not in ('import', 'capture', 'edit', 'name', 'rating', 'size')
+        or type(query.get('descending', False)) is not bool
+    ):
+        raise ValueError('查询排序无效。')
     for key in ('terms', 'semantic_text'):
         text = query.get(key, '')
         if not isinstance(text, str) or len(text) > 1000:
@@ -118,6 +146,16 @@ def search(project, query, *, models=None, query_vector=None):
     vector = normalized(query_vector) if query_vector is not None else None
     results = []
     membership = None
+    from ..catalog import Catalog
+
+    catalog = Catalog(project)
+    exact_rules = [
+        {'field': field, 'op': 'eq', 'value': query[field]}
+        for field in ('rating', 'flag', 'color_label', 'camera', 'lens', 'iso', 'format', 'edited')
+        if field in query
+    ]
+    if query.get('rules'):
+        exact_rules.append(query['rules'])
     if query.get('person_cluster'):
         from .analysis import suggestions
 
@@ -131,12 +169,28 @@ def search(project, query, *, models=None, query_vector=None):
         )
     preferences = project.preferences()
     terms = [v for v in re.split(r'\s+', query['terms'].casefold()) if v]
-    for offset in range(0, project.summary()['photos'], 200):
-        for photo in project.photos(200, offset):
-            if photo['status'] != 'ready':
+    catalog_options = dict(
+        rules={'all': exact_rules},
+        album=query.get('album'),
+        sort=query.get('sort', 'import'),
+        descending=query.get('descending', False),
+        include_collapsed=True,
+    )
+    total = catalog.query(**catalog_options, limit=1)['total']
+    order = {}
+    for offset in range(0, total, 200):
+        photos = catalog.query(**catalog_options, limit=200, offset=offset)['photos']
+        metadata_batch = catalog.metadata_batch(photos)
+        for photo in photos:
+            order[photo['id']] = len(order)
+            if photo['status'] not in ('ready', 'missing'):
                 continue
             facts = photo['facts']
             annotation = preferences.get('annotation:' + photo['id'], {})
+            metadata = metadata_batch[photo['id']]
+            annotation = dict(
+                annotation, person_count=metadata['person_count'], tags=metadata['keywords']
+            )
             evidence = []
             captured = facts.get('captured_at')
             if query.get('from_date') or query.get('to_date'):
@@ -197,10 +251,18 @@ def search(project, query, *, models=None, query_vector=None):
                 dict(id=photo['id'], score=round(score, 5), evidence=evidence or ['工程照片'])
             )
         if len(results) > query['limit'] * 4:
-            results = sorted(results, key=lambda r: (-r['score'], r['id']))[: query['limit']]
+            results = (
+                results[: query['limit']]
+                if 'sort' in query
+                else sorted(results, key=lambda r: (-r['score'], r['id']))[: query['limit']]
+            )
+    ranked = sorted(
+        results,
+        key=(lambda r: order[r['id']]) if 'sort' in query else (lambda r: (-r['score'], r['id'])),
+    )[: query['limit']]
     return dict(
         query=query,
-        photos=sorted(results, key=lambda r: (-r['score'], r['id']))[: query['limit']],
+        photos=ranked,
         semantic=vector is not None,
         count_policy='unknown counts are labelled; strict_people excludes them',
     )

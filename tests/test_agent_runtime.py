@@ -63,6 +63,62 @@ def test_cancelled_turn_never_calls_provider(tmp_path):
     assert provider.calls == []
 
 
+def test_real_nanobot_loop_discovers_creates_and_previews_a_geometry_proposal(tmp_path):
+    from test_agent_controls import photo_project
+
+    project, ids = photo_project(tmp_path)
+    emitted = []
+
+    class EditProvider(ScriptedProvider):
+        async def chat(self, messages, tools=None, **kwargs):
+            self.calls.append((messages, tools))
+            step = len(self.calls)
+            if step == 1:
+                name, arguments = 'get_edit_controls', {'photo_id': ids[0], 'section': 'crop'}
+            elif step == 2:
+                result = json.loads(
+                    next(m['content'] for m in reversed(messages) if m['role'] == 'tool')
+                )
+                assert result['schema']['type'] == ['array', 'null']
+                name, arguments = (
+                    'propose_adjustment',
+                    {'photo_id': ids[0], 'patch': {'crop': [0.5, 0, 1, 1], 'rotation': 1}},
+                )
+            elif step == 3:
+                result = json.loads(
+                    next(m['content'] for m in reversed(messages) if m['role'] == 'tool')
+                )
+                assert result['proposals'][0]['rotation'] == 1
+                name, arguments = (
+                    'preview_edit',
+                    {'proposal_id': result['proposals'][0]['id'], 'max_edge': 512},
+                )
+            else:
+                return LLMResponse(content='请在预览中确认裁切效果。')
+            return LLMResponse(
+                content=None,
+                tool_calls=[ToolCallRequest(id=f'edit{step}', name=name, arguments=arguments)],
+            )
+
+    provider = EditProvider()
+    reply = asyncio.run(
+        run_turn(
+            project,
+            '裁切右半部分并旋转，先预览',
+            selected=ids,
+            provider=provider,
+            emit=lambda kind, value: emitted.append((kind, value)),
+        )
+    )
+    assert reply == '请在预览中确认裁切效果。'
+    assert len(provider.calls) == 4
+    assert any(
+        kind == 'tool.finished' and value['name'] == 'preview_edit' for kind, value in emitted
+    )
+    assert len(project.proposals(pending_only=True)) == 1
+    assert project.derivatives() == []
+
+
 def test_bounded_context_contains_facts_and_selected_ids_not_other_projects(tmp_path):
     from ccraw.photo_agent.runtime import factual_context
 

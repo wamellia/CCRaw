@@ -108,6 +108,68 @@ def test_existing_editor_saves_recipe_back_to_agent_project(app, tmp_path):
     window.close()
 
 
+def test_manual_agent_save_drains_older_autosave_before_committing(app, tmp_path, monkeypatch):
+    import copy, threading
+    from ccraw.photo_agent.ui import AgentWindow
+    from test_ui import wait_until
+
+    monkeypatch.setenv('CCRAW_DATA_DIR', str(tmp_path / 'user'))
+    monkeypatch.setenv('CCRAW_CACHE_DIR', str(tmp_path / 'cache'))
+    source = tmp_path / 'editable.png'
+    Image.new('RGB', (160, 100), (80, 90, 100)).save(source)
+    project = Project.create(tmp_path / 'album.ccrawagent', '工程')
+    ref = project.import_paths([source])[0]
+    window = AgentWindow(project)
+    window.gallery.item(0).setSelected(True)
+    window.open_editor()
+    editor = window.editors[0]
+    gate, entered = threading.Event(), threading.Event()
+    timer = None
+    try:
+        wait_until(
+            lambda: (
+                editor.source is not None
+                and not editor.loading
+                and not editor.jobs
+                and not editor.timer.isActive()
+            ),
+            timeout=60,
+        )
+        controller = editor._settings_binding.autosave
+        assert controller.flush()
+        original = controller.write
+        calls = []
+
+        def delayed(payload):
+            if not calls:
+                calls.append(1)
+                entered.set()
+                gate.wait(3)
+            original(payload)
+
+        controller.write = delayed
+        editor.edits['adjustments']['exposure'] = 0.1
+        editor.changed()
+        controller._start()
+        wait_until(entered.is_set)
+        editor.edits['adjustments']['exposure'] = 0.6
+        editor.changed()
+        timer = threading.Timer(0.1, gate.set)
+        timer.start()
+        next(
+            a for a in editor.menuBar().actions() if a.text() == '保存调整到 Photo Agent'
+        ).trigger()
+        wait_until(lambda: controller._future is not None and controller._future.done())
+        assert project.preferences()['recipe:' + ref]['adjustments']['exposure'] == 0.6
+    finally:
+        gate.set()
+        if timer is not None:
+            timer.join(3)
+        editor.saved_edits = copy.deepcopy(editor.edits)
+        editor.saved_snapshots = copy.deepcopy(editor.snapshots)
+        window.close()
+
+
 def test_recommendations_follow_selection_and_clear_only_selected_photo(app, tmp_path):
     from ccraw.photo_agent.ui import AgentWindow
     from ccraw.photo_agent.analysis import index_project

@@ -274,6 +274,7 @@ class ResolutionMixin:
         holder, token, cancel = self.detail_source, self.document_token, threading.Event()
         request = dict(
             edits=copy.deepcopy(self.edits),
+            color_settings=self.color_presentation(),
             backend=self.backend,
             level=view.level,
             final=view.final,

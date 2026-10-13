@@ -6,14 +6,19 @@ CCRaw 的源码许可不替代依赖许可。便携包保留动态库，Qt / PyS
 |---|---|
 | Photo-Butler 提示词模板及预览图片 | ISC，https://github.com/Jokerealm/Photo-Butler；ccraw/resources/Photo-Butler-LICENSE.txt |
 | semi-utils 智能水印版式参考与相机品牌图片 | Apache-2.0，https://github.com/leslievan/semi-utils；ccraw/resources/Semi-Utils-LICENSE.txt；品牌图片经过裁边、白底转透明和缩放，版式及 Photo Engine 集成由 CCRaw 实现 |
+| LightCraft 架构与专业工具设计参考 | MIT OR Apache-2.0，https://github.com/storytold/lightcraft，参考提交 76b5377868d912db69a777bda253a5b1b96b22bd 的 pipeline、develop、catalog、engine 命令、设置及 MCP 设计；CCRaw 以 Python 独立实现，未复制或打包 Rust 代码及品牌素材 |
+| LittleCMS 2.18 | MIT，https://github.com/mm2/Little-CMS；ccraw/resources/lcms2.dll 为 Windows x64 静态运行库构建；许可与来源见 LittleCMS-LICENSE.txt 和 LittleCMS-BUILD.txt |
+| Lensfun XML 格式参考 | https://github.com/lensfun/lensfun；CCRaw 独立实现 XML 标定读取，不随软件分发 Lensfun 程序或数据库；用户导入数据库应保留其来源许可（上游数据库通常为 CC-BY-SA-3.0） |
 | Python | PSF，https://www.python.org/ |
 | nanobot-ai 0.3.5（可选 Agent 核心循环） | MIT，https://github.com/HKUDS/nanobot；依赖许可由构建工具从已安装包收集 |
+| MCP Python SDK（可选 Agent stdio 接口，由 nanobot-ai 依赖提供） | MIT，https://github.com/modelcontextprotocol/python-sdk；依赖许可由构建工具从已安装包收集 |
 | Hugging Face tokenizers（可选本地 CLIP tokenizer） | Apache-2.0，https://github.com/huggingface/tokenizers |
 | OpenAI CLIP / Xenova 量化 ONNX | MIT，https://github.com/openai/CLIP；https://huggingface.co/Xenova/clip-vit-base-patch32；ccraw/resources/CLIP-LICENSE.txt |
 | OpenCV Zoo YuNet 人脸检测 | MIT，https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet；ccraw/resources/YuNet-LICENSE.txt |
 | OpenCV Zoo SFace 匿名人脸特征 | Apache-2.0，https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface；ccraw/resources/SFace-LICENSE.txt |
 | NumExpr / Numba / llvmlite | MIT / BSD-2-Clause / BSD-3-Clause and LLVM terms; see collected license texts |
 | NumPy | BSD，https://numpy.org/ |
+| threadpoolctl | BSD-3-Clause，https://github.com/joblib/threadpoolctl；限制 BLAS 线程，避免与像素处理线程竞争 |
 | OpenCV | Apache-2.0 等，https://opencv.org/ |
 | Pillow | HPND 等，https://python-pillow.org/ |
 | rawpy | MIT，https://github.com/letmaik/rawpy |

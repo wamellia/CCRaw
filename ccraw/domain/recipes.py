@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import copy
+from . import professional
 
 COLORS = [
     ('红', 0, '#ec6c75'),
@@ -48,7 +49,9 @@ def recipe():
     from ..watermark import defaults
 
     return dict(
-        version=5,
+        version=6,
+        process=1,
+        professional=professional.defaults(),
         watermark=defaults(),
         develop=dict(mode='linear', curve=[[0.0, 0.0], [1.0, 1.0]], source='线性起点'),
         adjustments=adjustments(),
@@ -86,7 +89,7 @@ def new_mask(kind, index):
     )
 
 
-def validate(data):
+def validate(data, _depth=0):
     """Reject malformed projects before they enter either the UI or renderer."""
     import math
 
@@ -113,9 +116,15 @@ def validate(data):
             )
         return base
 
-    if not isinstance(data, dict) or data.get('version') not in (1, 2, 3, 4, 5):
+    if _depth > 4:
+        raise ValueError('蒙版组合层次过深。')
+    if not isinstance(data, dict) or data.get('version') not in (1, 2, 3, 4, 5, 6):
         raise ValueError('不支持的工程版本。')
     r = recipe()
+    r['professional'] = professional.validate(data.get('professional', {}))
+    if type(data.get('process', 1)) is not int or data.get('process', 1) not in (1, 2):
+        raise ValueError('显影流程无效。')
+    r['process'] = data.get('process', 1)
     from ..watermark import validate as validate_watermark
 
     r['watermark'] = validate_watermark(data.get('watermark', r['watermark']))
@@ -265,6 +274,22 @@ def validate(data):
                     erase=bool(s.get('erase', False)),
                 )
             )
+        if 'components' in m:
+            parts = m['components']
+            if not isinstance(parts, list) or len(parts) > 64:
+                raise ValueError('最多支持 64 个蒙版组件。')
+            item['components'] = []
+            for part in parts:
+                if (
+                    not isinstance(part, dict)
+                    or set(part) != {'op', 'mask'}
+                    or part['op'] not in ('add', 'subtract', 'intersect')
+                ):
+                    raise ValueError('蒙版组件无效。')
+                temp = recipe()
+                temp['masks'] = [part['mask']]
+                component = validate(temp, _depth + 1)['masks'][0]
+                item['components'].append(dict(op=part['op'], mask=component))
         r['masks'].append(item)
     return r
 
@@ -289,7 +314,12 @@ LOOK_KEYS = (
 
 def extract_look(edits):
     clean = validate(edits)
-    return {key: copy.deepcopy(clean[key]) for key in LOOK_KEYS}
+    out = {key: copy.deepcopy(clean[key]) for key in LOOK_KEYS}
+    out['professional'] = {
+        key: copy.deepcopy(clean['professional'][key])
+        for key in ('calibration', 'detail', 'point_color', 'bw_mixer', 'profile')
+    }
+    return out
 
 
 def apply_look(edits, look, amount=100):
@@ -317,6 +347,22 @@ def apply_look(edits, look, amount=100):
     }
     result['grading']['balance'] = selected['grading']['balance'] * t
     result['monochrome'] = selected['monochrome'] if t > 0 else False
+    if 'professional' in look:
+        pro = professional.validate(look['professional'])
+        result.setdefault('professional', professional.defaults())
+        for key in ('calibration', 'detail'):
+            result['professional'][key] = {
+                k: base['professional'][key][k] + (v - base['professional'][key][k]) * t
+                for k, v in pro[key].items()
+            }
+        result['professional']['bw_mixer'] = [v * t for v in pro['bw_mixer']]
+        result['professional']['point_color'] = copy.deepcopy(pro['point_color'])
+        for sample in result['professional']['point_color']:
+            for key in ('hue', 'saturation', 'luminance'):
+                sample[key] *= t
+        result['professional']['profile'] = dict(
+            pro['profile'], amount=pro['profile']['amount'] * t
+        )
     return result
 
 

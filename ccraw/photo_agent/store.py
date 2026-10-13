@@ -50,7 +50,7 @@ class Project:
         if self.root.resolve().parent != self.path.parent:
             raise ValueError('工程数据目录超出范围。')
         self.root.mkdir(exist_ok=True)
-        for name in ('previews', 'derived', 'agent', 'sessions'):
+        for name in ('previews', 'derived', 'agent', 'sessions', 'proxies'):
             folder = self.root / name
             if folder.is_symlink() or folder.is_junction():
                 raise ValueError('工程输出目录不能是链接。')
@@ -60,7 +60,7 @@ class Project:
             raise ValueError('工程数据库不能是链接。')
         with self.connect() as db:
             version = db.execute('PRAGMA user_version').fetchone()[0]
-            if version > 1:
+            if version > 2:
                 raise ValueError('工程版本高于当前软件支持的版本。')
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS photos (
@@ -83,11 +83,21 @@ class Project:
                     provenance TEXT, created REAL);
                 PRAGMA user_version=1;
             """)
+            from ..catalog.repository import migrate
+
+            migrate(db)
 
     @contextmanager
     def connect(self):
         db = sqlite3.connect(self.database, timeout=15)
         db.row_factory = sqlite3.Row
+        db.create_function(
+            'catalog_extension',
+            1,
+            lambda path: Path(path).suffix.lower().lstrip('.'),
+            deterministic=True,
+        )
+        db.create_function('catalog_name', 1, lambda path: Path(path).name, deterministic=True)
         db.execute('PRAGMA foreign_keys=ON')
         db.execute('PRAGMA journal_mode=WAL')
         try:
@@ -129,6 +139,9 @@ class Project:
         added = []
         with self.connect() as db:
             total = db.execute('SELECT count(*) FROM photos').fetchone()[0]
+            last_import = db.execute('SELECT coalesce(max(imported_at),0) FROM photos').fetchone()[
+                0
+            ]
             for item in paths:
                 path = Path(item)
                 if path.is_symlink() or not path.is_file() or path.suffix.lower() not in supported:
@@ -136,13 +149,15 @@ class Project:
                 path = path.resolve()
                 stat = path.stat()
                 photo_id = identifier()
+                imported_at = max(time.time(), last_import + 0.00001)
                 cursor = db.execute(
-                    'INSERT OR IGNORE INTO photos(id,path,size,mtime) VALUES(?,?,?,?)',
-                    (photo_id, str(path), stat.st_size, stat.st_mtime_ns),
+                    'INSERT OR IGNORE INTO photos(id,path,size,mtime,imported_at) VALUES(?,?,?,?,?)',
+                    (photo_id, str(path), stat.st_size, stat.st_mtime_ns, imported_at),
                 )
                 if cursor.rowcount:
                     added.append(photo_id)
                     total += 1
+                    last_import = imported_at
                 if total > 100_000:
                     raise ValueError('单个工程最多导入 100000 张照片。')
         self.event('photos.imported', {'added': len(added)})
@@ -161,6 +176,21 @@ class Project:
     def photo(self, photo_id):
         with self.connect() as db:
             row = db.execute('SELECT * FROM photos WHERE id=?', (photo_id,)).fetchone()
+            if row is None:
+                copy = db.execute('SELECT * FROM virtual_copies WHERE id=?', (photo_id,)).fetchone()
+                if copy:
+                    row = db.execute(
+                        'SELECT * FROM photos WHERE id=?', (copy['source_photo_id'],)
+                    ).fetchone()
+                    if row:
+                        result = self._photo(row)
+                        result.update(
+                            id=photo_id,
+                            source_photo_id=copy['source_photo_id'],
+                            is_copy=True,
+                            copy_name=copy['name'],
+                        )
+                        return result
         if row is None:
             raise ValueError('照片不属于当前工程。')
         return self._photo(row)
@@ -194,14 +224,29 @@ class Project:
         )
 
     def preference(self, key, value):
+        if str(key).startswith('recipe:'):
+            ref = str(key)[7:]
+            photo = self.photo(ref)
+            if photo.get('is_copy'):
+                from ..catalog import Catalog
+
+                Catalog(self).save_copy_recipe(ref, value)
+                return
         with self.connect() as db:
             db.execute(
                 'INSERT OR REPLACE INTO preferences VALUES(?,?)',
                 (
                     str(key)[:80],
-                    encoded(value, 2_000_000 if str(key).startswith('recipe:') else 8192),
+                    encoded(
+                        value, 2_000_000 if str(key).startswith(('recipe:', 'snapshots:')) else 8192
+                    ),
                 ),
             )
+            if str(key).startswith('recipe:'):
+                db.execute(
+                    'INSERT INTO photo_state(photo_ref,edited_at) VALUES(?,?) ON CONFLICT(photo_ref) DO UPDATE SET edited_at=excluded.edited_at',
+                    (str(key)[7:], time.time()),
+                )
 
     def preferences(self):
         with self.connect() as db:
@@ -280,30 +325,43 @@ class Project:
         return proposal_id
 
     def replace_proposals(self, photo_id, kind, payloads):
-        self.photo(photo_id)
-        if not 1 <= len(payloads) <= 3:
-            raise ValueError('一次最多创建三种编辑方案。')
-        records = [
-            dict(
-                id=identifier(),
-                photo_id=photo_id,
-                kind=kind,
-                payload=payload,
-                created=time.time(),
-                status='pending',
-            )
-            for payload in payloads
-        ]
-        values = [(p['id'], photo_id, kind, encoded(p['payload']), p['created']) for p in records]
+        return self.replace_proposal_batches([(photo_id, kind, payloads)])
+
+    def replace_proposal_batches(self, batches):
+        if not 1 <= len(batches) <= 30 or len({p[0] for p in batches}) != len(batches):
+            raise ValueError('一次需要 1–30 张不同的照片。')
+        records, values = [], []
+        for photo_id, kind, payloads in batches:
+            self.photo(photo_id)
+            if not 1 <= len(payloads) <= 3:
+                raise ValueError('一次最多创建三种编辑方案。')
+            for payload in payloads:
+                record = dict(
+                    id=identifier(),
+                    photo_id=photo_id,
+                    kind=kind,
+                    payload=payload,
+                    created=time.time(),
+                    status='pending',
+                )
+                values.append((record['id'], photo_id, kind, encoded(payload), record['created']))
+                records.append(record)
         with self.connect() as db:
-            db.execute(
+            db.executemany(
                 "UPDATE proposals SET status='superseded' WHERE photo_id=? AND kind=? AND status='pending'",
-                (photo_id, kind),
+                [(photo_id, kind) for photo_id, kind, _ in batches],
             )
             db.executemany(
                 'INSERT INTO proposals(id,photo_id,kind,payload,created) VALUES(?,?,?,?,?)', values
             )
         return records
+
+    def get_proposal(self, proposal_id):
+        with self.connect() as db:
+            row = db.execute('SELECT * FROM proposals WHERE id=?', (proposal_id,)).fetchone()
+        if row is None:
+            raise ValueError('编辑方案不存在。')
+        return dict(row, payload=json.loads(row['payload']))
 
     def dismiss_proposals(self, photo_ids):
         ids = list(dict.fromkeys(photo_ids))
@@ -360,7 +418,7 @@ class Project:
         return path
 
     def directory(self, name):
-        if name not in ('previews', 'derived', 'agent', 'sessions'):
+        if name not in ('previews', 'derived', 'agent', 'sessions', 'proxies'):
             raise ValueError('工程目录名称无效。')
         folder = self.root / name
         if (
