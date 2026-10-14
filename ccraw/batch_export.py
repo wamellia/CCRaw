@@ -25,6 +25,8 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSpinBox,
     QVBoxLayout,
+    QScrollArea,
+    QWidget,
 )
 
 from . import engine, model, watermark
@@ -32,11 +34,11 @@ from . import engine, model, watermark
 log = logging.getLogger(__name__)
 
 FORMATS = (
-    ('JPEG · 8-bit sRGB', '.jpg'),
-    ('PNG · 8-bit sRGB', '.png'),
-    ('TIFF · 16-bit sRGB', '.tif'),
+    ('JPEG', '.jpg'),
+    ('PNG', '.png'),
+    ('TIFF', '.tif'),
     ('DNG · 16-bit 线性成片', '.dng'),
-    ('PSD · 合并 RGB · 8/16-bit', '.psd'),
+    ('PSD · 合并 RGB', '.psd'),
 )
 #: Output sizes: None keeps the full size, otherwise the long edge in pixels (never enlarged).
 SIZES = (
@@ -101,10 +103,11 @@ class BatchExportDialog(QDialog):
         self.status = QLabel('')
         self.status.setObjectName('subtle')
         root.addWidget(self.status)
-        buttons = QDialogButtonBox(
+        buttons = self.buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         buttons.button(QDialogButtonBox.StandardButton.Ok).setText(f'导出 {count} 张')
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setObjectName('primary')
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText('取消')
         buttons.accepted.connect(self.confirm)
         buttons.rejected.connect(self.reject)
@@ -112,6 +115,25 @@ class BatchExportDialog(QDialog):
         self.format.currentIndexChanged.connect(
             lambda i: self.quality.setEnabled(FORMATS[i][1] == '.jpg')
         )
+        self.scale.currentIndexChanged.connect(lambda i: self.method.setEnabled(i > 0))
+        self.method.setEnabled(False)
+        content = QWidget()
+        body = QVBoxLayout(content)
+        body.setContentsMargins(0, 0, 8, 0)
+        while root.count() > 3:
+            item = root.takeAt(1)
+            if item.widget() is not None:
+                body.addWidget(item.widget())
+            elif item.layout() is not None:
+                body.addLayout(item.layout())
+        self.content_scroll = QScrollArea()
+        self.content_scroll.setWidgetResizable(True)
+        self.content_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self.content_scroll.setWidget(content)
+        root.insertWidget(1, self.content_scroll, 1)
+        available = self.screen().availableGeometry()
+        self.setMinimumWidth(min(520, max(320, available.width() - 32)))
+        self.resize(min(680, available.width() - 32), min(720, available.height() - 64))
 
     def choose_folder(self):
         folder = QFileDialog.getExistingDirectory(self, '选择导出目录', self.folder.text())
@@ -248,7 +270,9 @@ def run(items, options, backend, progress, cancel):
                     cancelled=cancel.is_set,
                 )
             else:
-                result = watermark.apply(result, edits['watermark'], photo)
+                from .photo_metadata import watermark_context
+
+                result = watermark.apply(result, edits['watermark'], watermark_context(photo, path))
                 target = target_path(options['folder'], path, options['extension'], taken)
                 engine.export_image(target, result, options['quality'], photo=photo)
             results.append((path, str(target), ''))

@@ -6,8 +6,8 @@ CCRaw 的照片编辑和 Photo Agent 共用 Photo Engine。传统 `.ccraw` 和 `
 
 1. 安装 `requirements-agent.txt`，使用 `main.py` 启动。
 2. 点击「Photo Agent 新建工程」或「打开 Agent 工程」。启动页右侧的最近工程按打开时间排序，可搜索名称或路径，单击即可打开；「快捷编辑」直接进入传统照片编辑器。
-3. 在「模型设置」选择支持工具调用的模型。该配置与照片编辑器的修图指令共用，API Key 使用 Windows DPAPI 保存。
-4. 点击「本地模型」下载校验后的 CLIP、YuNet 和 SFace，或运行 `python tools/agent_models.py`。这一步只下载模型，不上传照片。
+3. 在「设置 → AI 与服务 → 对话与修图」选择支持工具调用的模型。该配置与照片编辑器的修图指令共用，API Key 使用 Windows DPAPI 保存。
+4. 从「设置 → AI 与服务 → 本地模型」下载校验后的 CLIP、YuNet 和 SFace，或运行 `python tools/agent_models.py`。这一步只下载模型，不上传照片。
 5. 导入照片或文件夹。先完成本地扫描，再在模型已配置时启动整理对话。
 
 ## 查询与编辑

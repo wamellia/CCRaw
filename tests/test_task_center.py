@@ -61,3 +61,34 @@ def test_retained_closed_editor_does_not_block_device_preferences(app, tmp_path)
         assert not _busy()
     finally:
         owner.deleteLater()
+
+
+def test_editor_close_drains_thumbnail_activity_even_when_callback_is_suppressed(
+    app, tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+    from ccraw.app import MainWindow
+    from test_ui import wait_until
+
+    monkeypatch.setenv('CCRAW_DATA_DIR', str(tmp_path / 'user'))
+    monkeypatch.setenv('CCRAW_CACHE_DIR', str(tmp_path / 'cache'))
+    window = MainWindow()
+    window.show()
+    wait_until(lambda: not window.scheduler.jobs)
+    window.scheduler.pool = SimpleNamespace(start=lambda *args: None)
+    window.work.begin(Activity.THUMBNAILS)
+    job = window.scheduler.submit(
+        lambda: 1,
+        lambda _: window.work.end(Activity.THUMBNAILS),
+        lambda _: window.work.end(Activity.THUMBNAILS),
+    )
+    try:
+        window.close()
+        assert window.closing and window.work.active(Activity.THUMBNAILS)
+        assert window.scheduler.active is job  # A running job still blocks device changes.
+        job.run()
+        wait_until(lambda: not window.isVisible())
+        assert not window.work.active(Activity.THUMBNAILS)
+        assert not window.scheduler.jobs and window.scheduler.active is None
+    finally:
+        window.deleteLater()

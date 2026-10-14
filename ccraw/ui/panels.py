@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QToolButton,
     QSizePolicy,
+    QMenu,
 )
 from .. import model
 from ..widgets import AdjustSlider, Canvas, CurveEditor, Histogram
@@ -26,7 +27,8 @@ from ..watermark_dialog import WatermarkEditor
 
 from .components import note, heading
 from .icons import set_icon
-from .theme import AppearanceButton, style_swatch
+from .theme import AppearanceButton, style_swatch, set_disclosure
+from .editor_groups import CATEGORIES, EditorGroups, LegacyToolTabs
 
 
 class PanelsMixin:
@@ -160,8 +162,7 @@ class PanelsMixin:
         r.addWidget(self.histogram_panel)
         self.histogram_button.toggled.connect(self.histogram_panel.setVisible)
         self._compact_inspector = False
-        self.tabs = QTabWidget()
-        self.tabs.currentChanged.connect(self.tab_changed)
+        self.tabs = LegacyToolTabs(self)
         self.tabs.tabBar().hide()
         self.tool_select = QComboBox()
         self.tool_select.setAccessibleName('调整工具')
@@ -170,7 +171,6 @@ class PanelsMixin:
         self.tool_grid.setSpacing(4)
         r.addLayout(self.tool_grid)
         r.addWidget(self.tool_select)
-        r.addWidget(self.tabs, 1)
         self.build_basic()
         self.build_color()
         self.build_watermark()
@@ -181,9 +181,12 @@ class PanelsMixin:
         self.build_effects()
         self.build_retouch()
         self.build_professional()
-        self.tool_select.addItems([self.tabs.tabText(i) for i in range(self.tabs.count())])
-        self.tool_select.currentIndexChanged.connect(self.tabs.setCurrentIndex)
-        self.tabs.currentChanged.connect(self.tool_select.setCurrentIndex)
+        self.build_editor_groups()
+        self.editor_categories.setMinimumHeight(175)
+        r.addWidget(self.editor_categories, 1)
+        self.tool_select.addItems(CATEGORIES)
+        self.tool_select.currentIndexChanged.connect(self.editor_categories.setCurrentIndex)
+        self.editor_categories.currentChanged.connect(self.tool_select.setCurrentIndex)
         self.build_tool_navigation()
         backend_row = QHBoxLayout()
         self.backend_combo = QComboBox()
@@ -191,10 +194,24 @@ class PanelsMixin:
         self.backend_combo.setToolTip('计算设备')
         self.backend_combo.currentIndexChanged.connect(self.backend_changed)
         backend_row.addWidget(self.backend_combo, 1)
-        backend_row.addWidget(self.button('重置', self.reset_edits))
+        self.editor_reset_button = self.button('重置当前分组', self.reset_editor_section)
+        backend_row.addWidget(self.editor_reset_button)
+        self.editor_reset_menu = QMenu(self)
+        self.editor_reset_more_button = QToolButton()
+        self.editor_reset_more_button.setObjectName('disclosureButton')
+        self.editor_reset_more_button.setAccessibleName('重置选项')
+        self.editor_reset_more_button.setToolTip('重置当前分组或整张照片')
+        self.editor_reset_more_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.editor_reset_more_button.setMenu(self.editor_reset_menu)
+        set_disclosure(self.editor_reset_more_button, True)
+        backend_row.addWidget(self.editor_reset_more_button)
+        self.refresh_editor_reset()
         r.addLayout(backend_row)
-        self.backend_label = note(self.backend.name)
-        self.backend_label.hide()
+        self.backend_label = note('')
+        self.backend_label.setAccessibleName('计算设备与实际路径')
+        self.backend_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.backend_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        r.addWidget(self.backend_label)
 
         splitter.addWidget(right)
         splitter.setSizes([240, 940, 420])
@@ -205,29 +222,39 @@ class PanelsMixin:
         self.statusBar().showMessage('就绪')
         self.state_label = self.statusBar().state_label
         self.state_label.setText('')
-        self.statusBar().refresh_mode()
+        self.refresh_backend_status()
         self.build_menus()
+
+    def refresh_backend_status(self, refresh_badge=True):
+        """Present cached device facts, including before any photo is loaded.
+
+        Backend summaries must remain cheap: this method also runs on the
+        existing compute-status timer, never initializing a GPU from the GUI.
+        """
+        if hasattr(self, 'backend_label'):
+            from .. import i18n
+
+            summary = getattr(self.backend, 'device_summary', None)
+            tooltip = getattr(self.backend, 'device_tooltip', None)
+            text = summary() if callable(summary) else getattr(self.backend, 'name', 'CPU')
+            detail = tooltip() if callable(tooltip) else getattr(self.backend, 'warning', '')
+            if self.backend_label.property('_i18n_source_text') != text:
+                i18n.set_message(self.backend_label, text)
+            translated = i18n.translate(detail)
+            if self.backend_label.toolTip() != translated:
+                self.backend_label.setToolTip(translated)
+        if refresh_badge:
+            self.statusBar().refresh_mode()
 
     def build_tool_navigation(self):
         self.tool_group = QButtonGroup(self)
         self.tool_group.setExclusive(True)
-        symbols = [
-            'light',
-            'color',
-            'watermark',
-            'detail',
-            'mask',
-            'crop',
-            'grading',
-            'effects',
-            'retouch',
-            'detail',
-        ]
+        symbols = ['light', 'color', 'detail', 'crop', 'mask', 'effects']
         self.tool_buttons = []
         for index, symbol in enumerate(symbols):
             button = QToolButton()
             button.setObjectName('toolNavigation')
-            button.setText(self.tabs.tabText(index))
+            button.setText(CATEGORIES[index])
             button.setAccessibleName(button.text())
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             button.setCheckable(True)
@@ -236,11 +263,13 @@ class PanelsMixin:
             set_icon(button, symbol)
             self.tool_group.addButton(button, index)
             self.tool_buttons.append(button)
-        for position, index in enumerate((0, 1, 3, 4, 5, 6, 7, 8, 9, 2)):
-            self.tool_grid.addWidget(self.tool_buttons[index], position // 3, position % 3)
-        self.tool_group.idClicked.connect(self.tabs.setCurrentIndex)
-        self.tabs.currentChanged.connect(lambda index: self.tool_buttons[index].setChecked(True))
-        self.tool_buttons[self.tabs.currentIndex()].setChecked(True)
+        for index, button in enumerate(self.tool_buttons):
+            self.tool_grid.addWidget(button, index // 3, index % 3)
+        self.tool_group.idClicked.connect(self.editor_categories.setCurrentIndex)
+        self.editor_categories.currentChanged.connect(
+            lambda index: self.tool_buttons[index].setChecked(True)
+        )
+        self.tool_buttons[self.editor_categories.currentIndex()].setChecked(True)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -251,11 +280,9 @@ class PanelsMixin:
                 self.histogram_button.setChecked(not compact)
                 self.exposure_curve.setFixedHeight(120 if compact else 165)
             short = self.height() < 760
-            # Keep useful editing space on 1080p at 150% and smaller screens.
-            # The same named tools remain available in a single selection row.
-            self.tool_select.setVisible(short)
+            self.tool_select.hide()
             for button in self.tool_buttons:
-                button.setVisible(not short)
+                button.show()
             self.canvas.setMinimumHeight(180 if short else 380)
             from PySide6.QtCore import QSize
 
@@ -292,13 +319,102 @@ class PanelsMixin:
         self.professional_editor.bwTargetRequested.connect(self.update_tool)
         self.professional_editor.rangeRequested.connect(self.changed)
         self.professional_editor.constrainRequested.connect(self.professional_constrain)
-        self.professional_editor.tabs.currentChanged.connect(lambda _: self.changed())
-        self.professional_editor.tabs.currentChanged.connect(self.update_tool)
         self.professional_editor.geometry_grid.toggled.connect(self.update_tool)
         self.canvas.color_sampled.connect(self.professional_sample)
         self.canvas.target_started.connect(self.professional_bw_start)
         self.canvas.target_moved.connect(self.professional_bw_move)
         l.addWidget(self.professional_editor, 1)
+
+    def build_editor_groups(self):
+        groups = self.editor_groups = EditorGroups(self)
+        self.editor_categories = groups.tabs
+        old_pages = [self.tabs.widget(i) for i in range(self.tabs.count())]
+        entries = [
+            (0, 'light', '曝光与动态范围', 0),
+            (1, 'color', '全局色彩与混合器', 1),
+            (3, 'detail', '质感与降噪', 2),
+            (5, 'crop', '裁切与旋转', 3),
+            (4, 'masks', '蒙版与局部调整', 4),
+            (8, 'retouch', '修复与仿制', 4),
+            (7, 'effects', '暗角与胶片颗粒', 5),
+            (2, 'watermark', '模板水印', 5),
+            (6, 'grading', '色彩分级', 1),
+        ]
+        for legacy, key, title, category in entries:
+            content = old_pages[legacy].takeWidget()
+            # Stretches belong to the category page; inside a section they waste
+            # parameter space in short windows.
+            layout = content.layout()
+            if layout.count() and layout.itemAt(layout.count() - 1).spacerItem():
+                layout.takeAt(layout.count() - 1)
+            groups.add(key, title, category, content, legacy)
+            self.tabs.routes[legacy] = groups.pages[category]
+        for key, title, category, widget, legacy in [
+            ('white_balance', '白平衡', 1, self.white_balance_panel, 0),
+            ('curves', 'RGB 与通道曲线', 0, self.curve_panel, 1),
+        ]:
+            groups.add(key, title, category, widget, legacy)
+        for index, key, title, category in [
+            (0, 'optics', '镜头与光学校正', 3),
+            (1, 'geometry', '透视与几何', 3),
+            (2, 'calibration', '相机色彩校准', 1),
+            (3, 'professional_detail', '精细锐化与降噪', 2),
+            (4, 'bw_mixer', '黑白混色', 1),
+            (5, 'point_color', '点颜色与范围', 1),
+            (6, 'profile', '颜色配置文件', 1),
+            (7, 'red_eye', '红眼修复', 4),
+        ]:
+            content = self.professional_editor.tabs.widget(index).takeWidget()
+            layout = content.layout()
+            if layout.count() and layout.itemAt(layout.count() - 1).spacerItem():
+                layout.takeAt(layout.count() - 1)
+            groups.add(key, title, category, content, 9, index)
+        self.professional_editor.hide()
+        self.professional_editor.tabs.hide()
+        self.tabs.routes[9] = groups.pages[3]
+        process = QWidget()
+        layout = QVBoxLayout(process)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(note('显影空间决定后续色彩运算的工作空间。'))
+        layout.addWidget(self.process_select)
+        groups.add('process', '显影空间', 0, process, 0)
+        self.tabs.currentChanged.connect(groups.legacy_changed)
+        self.professional_editor.tabs.currentChanged.connect(groups.professional_changed)
+        # Stable named tab state lets WorkspaceStore preserve the selected
+        # section as well as old tool indices, without changing recipe storage.
+        self.editor_section_state = QTabWidget(self)
+        self.editor_section_state.setObjectName('editorSectionState')
+        self.editor_section_state.hide()
+        for key in groups.sections:
+            self.editor_section_state.addTab(QWidget(), key)
+        self.editor_section_state.currentChanged.connect(
+            lambda index: groups.select(list(groups.sections)[index])
+        )
+        groups.select('light')
+
+    def select_editor_section(self, key):
+        self.editor_groups.select(key)
+
+    def editor_tool_active(self, key):
+        return self.editor_groups.active == key
+
+    def refresh_editor_reset(self):
+        if not hasattr(self, 'editor_reset_button'):
+            return
+        key = self.editor_groups.active
+        section = self.editor_groups.sections.get(key)
+        from ..scheduler import Activity
+
+        self.editor_reset_button.setEnabled(
+            section is not None
+            and self.source is not None
+            and not self.work.busy(Activity.LOADING, Activity.AI)
+        )
+        if hasattr(self, 'reset_current_action'):
+            self.reset_current_action.setEnabled(self.editor_reset_button.isEnabled())
+        self.editor_reset_button.setToolTip(
+            '重置：' + section.header.text() if section else '展开一个分组后重置'
+        )
 
     def panel(self, title):
         scroll = QScrollArea()
@@ -344,6 +460,10 @@ class PanelsMixin:
                 row.addLayout(column, 1)
             l.addLayout(row)
         self.build_develop_profile(l)
+        l.addStretch()
+        self.white_balance_panel = QWidget()
+        l = QVBoxLayout(self.white_balance_panel)
+        l.setContentsMargins(8, 8, 8, 8)
         l.addWidget(heading('白平衡'))
         row = QHBoxLayout()
         self.wb_button = QPushButton('吸管取样')
@@ -355,7 +475,6 @@ class PanelsMixin:
         self.build_camera_wb(l)
         self.add_adjustment(l, '色温偏移', 'temperature')
         self.add_adjustment(l, '色调', 'tint')
-        l.addStretch()
 
     def build_color(self):
         l = self.panel('色彩')
@@ -396,7 +515,10 @@ class PanelsMixin:
             c.committed.connect(self.commit)
             l.addWidget(c)
             self.hsl_controls.append(c)
-        self.build_curves(l)
+        self.curve_panel = QWidget()
+        curve_layout = QVBoxLayout(self.curve_panel)
+        curve_layout.setContentsMargins(8, 8, 8, 8)
+        self.build_curves(curve_layout)
         l.addStretch()
 
     def build_curves(self, l):
@@ -431,7 +553,7 @@ class PanelsMixin:
 
     def build_watermark(self):
         l = self.panel('水印')
-        l.addWidget(heading('水印与边框'))
+        l.addWidget(heading('模板水印'))
         self.watermark_editor = WatermarkEditor(self, compact=True)
         self.watermark_editor.changed.connect(self.watermark_changed)
         l.addWidget(self.watermark_editor)

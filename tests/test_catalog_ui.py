@@ -21,11 +21,11 @@ def test_rating_flag_auto_advance_and_text_focus(app, tmp_path):
     w.show()
     app.processEvents()
     try:
-        assert hasattr(w, 'catalog') and hasattr(w, 'rating_buttons')
+        assert hasattr(w, 'catalog') and hasattr(w, 'rating_actions')
         w.gallery.setCurrentRow(0)
         ref = w.selected_ids()[0]
         w.auto_advance.setChecked(True)
-        w.rating_buttons[4].click()
+        w.rating_actions[4].trigger()
         assert w.catalog.state(ref)['rating'] == 4
         assert w.gallery.currentRow() == 1
         w.gallery.setFocus()

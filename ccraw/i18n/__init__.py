@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import re
 
-from PySide6.QtCore import QTranslator
+from PySide6.QtCore import QTranslator, Qt
 from PySide6.QtWidgets import (
     QAbstractButton,
     QComboBox,
@@ -20,6 +20,9 @@ from PySide6.QtWidgets import (
     QWidget,
     QApplication,
     QDialogButtonBox,
+    QGroupBox,
+    QTreeWidget,
+    QTreeWidgetItemIterator,
 )
 from PySide6.QtGui import QAction
 
@@ -73,9 +76,25 @@ AI 与服务|AI and services
 界面语言|Interface language
 中文|Chinese
 自动|Automatic
-自动加速|Automatic acceleration
+自动加速|Auto
 计算设备|Compute device
 实际设备|Active device
+计算设备与实际路径|Compute device and actual route
+专用显存|Dedicated VRAM
+专用显存约|Approx. dedicated VRAM
+显存约|Approx. VRAM
+手动模式|Manual mode
+未检测到 GPU|No GPU detected
+（待验证）| (pending verification)
+按图像大小与操作选择；尚未执行 GPU 滤镜|Selected by image size and operation; GPU filters have not run yet
+部分处理仍由 CPU 完成；小图与缓存命中保持 CPU 快速路径。|Some processing still runs on the CPU; small images and cache hits use the fast CPU path.
+ONNX 没有可用的 GPU 后端；像素操作使用 CPU，滤镜按成本选择设备。|No GPU provider is available for ONNX; pixel operations use the CPU, and filters select a device by cost.
+手动 CPU 模式；滤镜和像素操作使用 CPU。|Manual CPU mode; filters and pixel operations use the CPU.
+没有可用的 OpenCL GPU；邻域工具使用 CPU。|No OpenCL GPU is available; neighborhood tools use the CPU.
+OpenCL 邻域细节|OpenCL neighborhood detail
+手动 CPU 模式|Manual CPU mode
+部分处理仍由 CPU 完成。|Some processing still runs on the CPU.
+最近计算步骤；部分处理仍由 CPU 完成。|Recent compute stage; some processing still runs on the CPU.
 回退原因|Fallback reason
 渲染内存预算|Render memory budget
 缩略图磁盘预算|Thumbnail disk budget
@@ -317,6 +336,7 @@ RGB 与通道曲线|RGB and channel curves
 局部清晰度|Local clarity
 局部锐化|Local sharpening
 水印|Watermark
+模板水印|Template watermark
 智能水印|Smart watermark
 水印与边框|Watermark and border
 水印版式|Watermark layout
@@ -625,10 +645,7 @@ Seedream 或兼容 /images/generations 的服务。|Seedream or a service compat
 快照|Snapshots
 指令|Instructions
 无标签|No label
-普通边框|Plain border
-智能参数|Smart parameters
 智谱 GLM|Zhipu GLM
-暗夜黑|Night black
 替换|Replace
 最近导入|Recently imported
 月之暗面 Kimi|Moonshot Kimi
@@ -636,7 +653,6 @@ Seedream 或兼容 /images/generations 的服务。|Seedream or a service compat
 污点修复|Spot healing
 火山方舟 · 豆包|Volcengine Ark · Doubao
 点“获取模型列表”或直接填写|Click Get models or enter a model name
-画廊白|Gallery white
 相册管理|Album management
 管理相册|Manage albums
 相机参考显影|Camera reference development
@@ -679,6 +695,256 @@ Seedream 或兼容 /images/generations 的服务。|Seedream or a service compat
 布局未保存：|Layout not saved:
 """
 CATALOG = dict(line.split('|', 1) for line in _PAIRS.splitlines() if '|' in line)
+CATALOG.update(
+    {
+        '当前设备：': 'Current device: ',
+        '当前路径：': 'Current route: ',
+        '最近计算步骤：': 'Recent compute stage: ',
+        '驱动：': 'Driver: ',
+        'ONNX 后端：': 'ONNX providers: ',
+        '滤镜设备：': 'Filter device: ',
+        'GPU 步骤：': 'GPU stages: ',
+        '滤镜：': 'Filters: ',
+        'OpenCL 检测失败：': 'OpenCL detection failed: ',
+        'OpenCL 邻域工具失败，已回退 CPU：': 'OpenCL neighborhood tools failed; CPU fallback: ',
+        '全部照片': 'All photos',
+        '导出时启用水印': 'Enable watermark on export',
+        '品牌、标志与拍摄参数': 'Brand, logos and capture parameters',
+        '拍摄参数覆盖': 'Capture parameter overrides',
+        '参数名称': 'Parameter name',
+        '覆盖值': 'Override value',
+        '处理步骤与嵌套文字': 'Processing steps and nested text',
+        '阴影半径': 'Shadow radius',
+        '阴影颜色': 'Shadow color',
+        '圆角半径': 'Corner radius',
+        '模糊半径': 'Blur radius',
+        '左右对齐': 'Horizontal alignment',
+        '上下对齐': 'Vertical alignment',
+        '文字片段': 'Text segments',
+        '文字来源': 'Text source',
+        '内容来源': 'Content source',
+        'px / 数值': 'px / value',
+        '{{vh(4)}} 或其他模板表达式': '{{vh(4)}} or another template expression',
+        '图片 / 标志': 'Image / logo',
+        '圆角': 'Rounded corners',
+        '居中标志': 'Center logo',
+        '恢复当前版式的默认配置': 'Restore defaults for this layout',
+        '文字': 'Text',
+        '旧版标准 / 自定义水印': 'Standard / custom layout',
+        '旧版阴影': 'Shadow layout',
+        '时间戳水印': 'Timestamp watermark',
+        '模糊': 'Blur',
+        '添加': 'Add',
+        '缩放': 'Resize',
+        '背景模糊': 'Background blur',
+        '自动读取照片参数；只添加需要替换的值。可编辑任意 EXIF 名称，文字模板可引用这些参数。': 'Photo metadata is read automatically. Add only values to override; text templates can reference any EXIF field.',
+        '表达式': 'Expression',
+        '裁剪': 'Crop',
+        '边距': 'Margins',
+        '选择树中的步骤、文字位置或片段编辑。尺寸支持 px、vh、vw 和表达式；vh / vw 基于原始照片。输入序号 0 为照片，1 为第一个步骤输出。': 'Select a step, text position or segment in the tree. Dimensions support px, vh, vw and expressions. Input index 0 is the photo; index 1 is the first step output.',
+        '阴影': 'Shadow',
+        '＋ 步骤': 'Add step',
+        '＋ 添加数值': 'Add value',
+        '＋ 添加资源': 'Add resource',
+        '边距颜色': 'Margin color',
+        '填充比例 W:H': 'Padding ratio W:H',
+        '中间间距': 'Middle spacing',
+        '右侧对齐': 'Right alignment',
+        '居中标志高度': 'Center logo height',
+        '左标志资源': 'Left logo resource',
+        '右标志资源': 'Right logo resource',
+        '居中标志资源': 'Center logo resource',
+        '裁剪偏移': 'Crop offset',
+        '起始颜色': 'Start color',
+        '结束颜色': 'End color',
+        '渐变方式': 'Gradient interpolation',
+        '水平对齐': 'Horizontal alignment',
+        '垂直对齐': 'Vertical alignment',
+        '文字对齐': 'Text alignment',
+        '背景颜色': 'Background color',
+        '叠放坐标': 'Layer offsets',
+        '叠放顺序权重': 'Layer order weights',
+        '输入图像序号': 'Input image indexes',
+        '输入图像资源': 'Input image resources',
+        '图片资源': 'Image resource',
+        '普通字大小等级': 'Regular text size level',
+        '粗体字大小等级': 'Bold text size level',
+        '粗体字体': 'Bold font',
+        '标志位置': 'Logo position',
+        '启用标志': 'Enable logo',
+        '标志资源': 'Logo resource',
+        '背景留白比例': 'Background padding ratio',
+        '背景白色混合': 'Background white blend',
+        '白框宽度': 'White frame width',
+        '机身文字颜色': 'Camera text color',
+        '参数文字颜色': 'Capture parameter color',
+        '修剪左侧': 'Trim left',
+        '修剪右侧': 'Trim right',
+        '修剪上侧': 'Trim top',
+        '修剪下侧': 'Trim bottom',
+        '在结构树中选择一个处理步骤或文字片段。': 'Select a processing step or text segment in the tree.',
+        '预览使用最终裁剪、旋转后的画面与导出尺寸计算水印。': 'Preview uses the final crop, rotation and export dimensions.',
+        '打开照片后显示水印预览': 'Open a photo to preview the watermark',
+        '文字 / 模板': 'Text / template',
+        '字体': 'Font',
+        '粗体': 'Bold',
+        '高度': 'Height',
+        '宽度': 'Width',
+        '左边距': 'Left margin',
+        '右边距': 'Right margin',
+        '上边距': 'Top margin',
+        '下边距': 'Bottom margin',
+        '分隔线颜色': 'Divider color',
+        '分隔线宽度': 'Divider width',
+        '文字间距': 'Text spacing',
+        '中央标志高度': 'Center logo height',
+        '左上文字': 'Upper left text',
+        '左下文字': 'Lower left text',
+        '右上文字': 'Upper right text',
+        '右下文字': 'Lower right text',
+        '左标志': 'Left logo',
+        '右标志': 'Right logo',
+        '中央标志': 'Center logo',
+        '分段文字': 'Segmented text',
+        '纯色画布': 'Solid color canvas',
+        '渐变画布': 'Gradient canvas',
+        '比例填充': 'Aspect ratio padding',
+        '修剪空白': 'Trim empty space',
+        '修剪文字空白': 'Trim text space',
+        '步骤类型': 'Step type',
+        '输入索引': 'Input indexes',
+        '图层顺序': 'Layer order',
+        '位置偏移': 'Position offset',
+        '叠放对齐': 'Layer alignment',
+        '拼接': 'Concatenate',
+        '向上移动数值': 'Move value up',
+        '向下移动数值': 'Move value down',
+        '删除数值': 'Remove value',
+        '上移选中步骤或片段': 'Move selected step or segment up',
+        '下移选中步骤或片段': 'Move selected step or segment down',
+        '编辑：': 'Editing: ',
+        '使用 35mm 等效焦距': 'Use 35mm equivalent focal length',
+        '已导入 PNG': 'PNG imported',
+        '模板 / 自动': 'Template / automatic',
+        '标准水印2': 'standard2',
+        '标准水印': 'standard1',
+        '尼康专用背景模糊': 'nikon_blur',
+        '右下角参数': 'normal1',
+        '文件夹名 + 时间': 'normal2',
+        'Logo 居中': 'center_logo',
+        '旧版 normal · Logo 居左': 'normal / left logo',
+        '旧版 normal · Logo 居右': 'normal / right logo',
+        '旧版黑红 · Logo 居左': 'Black and red / left logo',
+        '旧版黑红 · Logo 居右': 'Black and red / right logo',
+        '旧版自定义配置': 'Custom layout',
+        '旧版 1:1 填充': 'Square padding',
+        '旧版简洁': 'Simple layout',
+        '旧版背景模糊': 'Blurred background',
+        '旧版背景模糊 + 白框': 'Blurred background and white frame',
+        '旧版白色边框': 'White frame',
+        '重置选项': 'Reset options',
+        '重置当前分组或整张照片': 'Reset current section or the whole photo',
+        '选择一张有原片或可用离线代理的照片。': 'Select one photo with an original or a usable offline proxy.',
+        '选择一张照片标注人数与标签。': 'Select one photo to annotate people and tags.',
+        '选择 1–30 张已扫描且原片可用的照片。': 'Select 1–30 scanned photos with available originals.',
+        '选择一条整理建议后记录决定。': 'Select an organization suggestion before recording a decision.',
+        '重置所有调整': 'Reset all adjustments',
+        '设置范围': 'Settings scope',
+        '设置目录': 'Settings directory',
+        '工作区': 'Workspace',
+        '常规': 'General',
+        '工程偏好': 'Project preferences',
+        '照片与色彩': 'Photos and color',
+        '计算': 'Compute',
+        '预览与缓存': 'Previews and cache',
+        '维护与诊断': 'Maintenance and diagnostics',
+        '对话与修图': 'Chat and editing',
+        '图像生成': 'Image generation',
+        '语音': 'Voice',
+        '工作流': 'Workflow',
+        '工程备份': 'Project backups',
+        '会话恢复': 'Session recovery',
+        '工作区布局': 'Workspace layout',
+        '存储用量': 'Storage usage',
+        '诊断与任务': 'Diagnostics and tasks',
+        '相机规则': 'Camera rules',
+        '默认元数据': 'Default metadata',
+        '启动与确认': 'Startup and confirmation',
+        '界面偏好': 'Interface preferences',
+        '浏览与代理': 'Browsing and proxies',
+        '默认风格': 'Default looks',
+        '色彩管理': 'Color management',
+        '计算资源': 'Compute resources',
+        '预览预算': 'Preview budgets',
+        '缓存维护': 'Cache maintenance',
+        '模型服务': 'Model service',
+        '生成服务': 'Generation service',
+        '语音输入': 'Voice input',
+        '模型安装': 'Model installation',
+        '交换设置': 'Interchange settings',
+        '自动保存策略': 'Autosave policy',
+        '备份策略': 'Backup policy',
+        '可恢复会话': 'Recoverable sessions',
+        '应用默认值用于所有工作区；工程可单独覆盖导入与工程偏好。': 'Application defaults apply to all workspaces. Projects can override import and project preferences.',
+        '仅覆盖当前工程的导入与工程偏好；其他设置使用应用默认值。': 'Only import and project preferences are overridden for this project. Other settings use application defaults.',
+        '构图': 'Composition',
+        '局部': 'Local',
+        '全局色彩与混合器': 'Global color and mixer',
+        '质感与降噪': 'Texture and denoise',
+        '裁切与旋转': 'Crop and rotation',
+        '蒙版与局部调整': 'Masks and local adjustments',
+        '暗角与胶片颗粒': 'Vignette and grain',
+        '镜头与光学校正': 'Lens and optical correction',
+        '透视与几何': 'Perspective and geometry',
+        '相机色彩校准': 'Camera color calibration',
+        '精细锐化与降噪': 'Fine sharpening and denoise',
+        '黑白混色': 'Black-and-white mixer',
+        '点颜色与范围': 'Point color and range',
+        '颜色配置文件': 'Color profile',
+        '红眼修复': 'Red-eye correction',
+        '显影空间': 'Working color space',
+        '重置当前分组': 'Reset group',
+        '重置：': 'Reset: ',
+        '展开一个分组后重置': 'Expand a section to reset it',
+        '显影空间决定后续色彩运算的工作空间。': 'Working color space controls the space used for subsequent color operations.',
+        '图库导航': 'Library navigation',
+        '图库管理': 'Library management',
+        '选片': 'Culling',
+        '标记': 'Flag',
+        '选择照片后可编辑或整理': 'Select photos to edit or organize',
+        '选择照片以编辑或整理': 'Select photos to edit or organize',
+        '保留 / 拒绝': 'Pick / reject',
+        '更多操作': 'More actions',
+        '相册与筛选': 'Albums and filters',
+        '原片、代理与回收站': 'Originals, proxies and trash',
+        '历史与备份': 'History and backups',
+        '相册与文件夹': 'Albums and folders',
+        '常用筛选': 'Saved filters',
+        '常用筛选预设': 'Saved filter presets',
+        '内置筛选': 'Built-in filters',
+        '选中照片': 'Selected photos',
+        '添加到相册': 'Add to album',
+        '代理尺寸设置': 'Proxy dimensions',
+        '离线代理尺寸': 'Offline proxy dimensions',
+        '离线代理尺寸…': 'Offline proxy dimensions…',
+        '代理最长边；原片保持原始尺寸。': 'Proxy long edge; original dimensions are preserved.',
+        '选择需要同步的参数组': 'Choose parameter groups to synchronize',
+        '恢复默认选择': 'Restore default selection',
+        '选择全部': 'Select all',
+        '清空选择': 'Clear selection',
+        '勾选或取消本组全部参数': 'Select or clear all parameters in this group',
+        '默认保留每张照片的白平衡、裁切和局部调整。': "Defaults preserve each photo's white balance, crop and local adjustments.",
+        '颜色与精度': 'Color and precision',
+        '尺寸与分辨率': 'Dimensions and resolution',
+        '细节与命名': 'Detail and naming',
+        '元数据策略': 'Metadata policy',
+        '保留信息': 'Retained information',
+        '组件外观': 'Component appearance',
+        '位置与形状': 'Position and shape',
+        '添加组件': 'Add component',
+        '选择已有蒙版和运算方式，添加第一个组件。': 'Choose an existing mask and an operation to add the first component.',
+    }
+)
 _LANGUAGE = 'zh'
 _MISSING = set()
 _NATIVE_ZH = {
@@ -711,6 +977,7 @@ def translate(text, lang=None):
     if text in CATALOG:
         return CATALOG[text]
     patterns = [
+        (r'^已选择 (\d+) 张$', r'\1 photos selected'),
         (r'^选片集 · (\d+) 张 / 已选 (\d+) 张$', r'Album · \1 photos / \2 selected'),
         (r'^选片集 · (\d+) 张$', r'Album · \1 photos'),
         (r'^Agent · 第 (\d+) 轮$', r'Agent · Round \1'),
@@ -798,10 +1065,35 @@ def source_item(combo, index=None):
     return source if source is not None else combo.itemText(index)
 
 
+def _localize_tree(tree, lang):
+    blocked = tree.blockSignals(True)
+    iterator = QTreeWidgetItemIterator(tree)
+    while iterator.value() is not None:
+        item = iterator.value()
+        for column in range(tree.columnCount()):
+            if item.data(column, Qt.ItemDataRole.UserRole + 31):
+                continue
+            current = item.text(column)
+            source = item.data(column, Qt.ItemDataRole.UserRole + 30)
+            last = item.data(column, Qt.ItemDataRole.UserRole + 29)
+            if source is None or current != last:
+                source = current
+                item.setData(column, Qt.ItemDataRole.UserRole + 30, source)
+            rendered = translate(source, lang)
+            item.setText(column, rendered)
+            item.setData(column, Qt.ItemDataRole.UserRole + 29, rendered)
+        iterator += 1
+    tree.blockSignals(blocked)
+
+
 def localize_window(window, lang=None):
     lang = lang or _LANGUAGE
     widgets = [window] + window.findChildren(QWidget)
     for widget in widgets:
+        if isinstance(widget, QGroupBox) and not widget.property('user_content'):
+            _replace(widget, 'group_title', widget.title, widget.setTitle, lang)
+        if isinstance(widget, QTreeWidget) and not widget.property('user_content'):
+            _localize_tree(widget, lang)
         if isinstance(widget, (QAbstractButton, QLabel)) and not widget.property('user_content'):
             _replace(widget, 'text', widget.text, widget.setText, lang)
         if isinstance(widget, (QLineEdit, QPlainTextEdit)):

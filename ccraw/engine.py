@@ -13,6 +13,7 @@ import numpy as np
 from PIL import Image
 from . import white_balance, retouch, develop
 from . import large_image, compute
+from . import gpu_spatial
 
 log = logging.getLogger(__name__)
 
@@ -309,6 +310,10 @@ class RenderCache:
                 self._stages[stage] = (key, value)
         return value
 
+    def contains(self, stage, key):
+        entry = self._stages.get(stage)
+        return entry is not None and entry[0] == key
+
     def alpha(self, key, fn):
         if key in self._alphas:
             self.hits += 1
@@ -345,6 +350,7 @@ def _has_luminance(mask):
     )
 
 
+@gpu_spatial.routed
 def process(
     source,
     edits,
@@ -607,6 +613,7 @@ def dehaze_context_for(source, edits, backend=None, detail_scale=1.0):
     return dehaze_context(ops.reduce_noise(tonal, a), a['dehaze'])
 
 
+@gpu_spatial.routed
 def process_region(
     source,
     edits,

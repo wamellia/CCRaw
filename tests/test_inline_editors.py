@@ -31,13 +31,19 @@ def test_close_drains_active_job_and_drops_queued_previews(app):
     assert not calls and not w.queued_jobs
 
 
-def test_tabs_have_inline_watermark_and_color_curves(app):
+def test_categories_have_inline_watermark_and_light_curves(app):
     w = MainWindow()
     w.show()
-    assert [w.tabs.tabText(i) for i in range(3)] == ['光影', '色彩', '水印']
-    assert '曲线' not in [w.tabs.tabText(i) for i in range(w.tabs.count())]
-    assert w.tabs.widget(1).isAncestorOf(w.curve)
-    assert w.tabs.widget(2).isAncestorOf(w.watermark_editor)
+    assert [w.editor_categories.tabText(i) for i in range(6)] == [
+        '光影',
+        '色彩',
+        '细节',
+        '构图',
+        '局部',
+        '效果',
+    ]
+    assert w.editor_categories.widget(0).isAncestorOf(w.curve)
+    assert w.editor_categories.widget(5).isAncestorOf(w.watermark_editor)
     w.tabs.setCurrentIndex(2)
     assert not w.watermark_editor.enabled.isEnabled()
     assert w.pool.maxThreadCount() == 32
@@ -68,11 +74,14 @@ def test_curve_sliders_undo_and_inline_watermark(window):
     assert w.exposure_curve.values == baseline
     w.tabs.setCurrentIndex(2)
     w.watermark_editor.enabled.setChecked(True)
-    w.watermark_editor.sides['left'].setChecked(True)
-    assert w.edits['watermark']['enabled'] and 'left' in w.edits['watermark']['sides']
+    editor = w.watermark_editor
+    before = copy.deepcopy(w.edits['watermark'])
+    editor.layout_type.setCurrentIndex(editor.layout_type.findData('standard1'))
+    assert w.edits['watermark']['enabled'] and w.edits['watermark']['template'] == 'standard1'
     w.undo(-1)
-    assert 'left' not in w.edits['watermark']['sides']
-    assert not w.watermark_editor.sides['left'].isChecked()
+    assert w.edits['watermark'] == before
+    assert editor.layout_type.currentData() == before['template']
+    assert editor.pipeline_editor.values() == before['pipeline']
     for kind in ('super', 'denoise'):
         dialog = EnhancementDialog(w, kind)
         assert dialog.method.currentIndex() == 0 and dialog.method.count() == (

@@ -1,4 +1,4 @@
-"""Exercise the 1.1 desktop workflow and real full-resolution AI copies."""
+"""Exercise the desktop workflow and real full-resolution AI copies."""
 
 
 def run(destination, primary, others):
@@ -75,7 +75,7 @@ def run(destination, primary, others):
             w.grab().save(str(out / (kind + '-mask.png')))
         w.edits['masks'] = []
         w.current_mask = -1
-        w.edits['watermark'].update(enabled=True, preset='gallery', size=18.0)
+        w.edits['watermark']['enabled'] = True
         w.refresh()
         w.changed()
         settle()

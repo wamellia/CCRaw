@@ -1,10 +1,10 @@
-# CCRaw-Pro v1.1
+# CCRaw-Pro v1.2
 
 [简体中文](README.md) | English
 
 **An open-source professional photo editor and Photo Agent for Windows.**
 
-v1.1 is CCRaw's professional editing upgrade, bringing floating-point wide-gamut processing and color management, professional editing tools, a complete culling and catalog workflow, unified settings, and faster loading and live previews that retain the working preview resolution. The release is named **CCRaw-Pro v1.1**, with software version **1.1.0**. Existing project formats, Photo Agent, smart watermarks and image-generation workflows remain compatible.
+v1.2 improves editing efficiency, template watermarks and automatic GPU acceleration. Professional tools are grouped into Light, Color, Detail, Composition, Local and Effects; settings use a two-level directory. Template watermarks provide visual layout controls with standard2 as the default. Automatic acceleration selects a compute path according to image size and cached results, and displays GPU information. The release is named **CCRaw-Pro v1.2**, with software version **1.2.0**. Floating-point wide-gamut processing, culling and catalogs, Photo Agent and image generation remain available.
 
 CCRaw brings photo adjustments, local editing, photo selection and AI image creation into one workspace. Import an original image, adjust light and color with live previews, compare results, save your project and export a separate finished image. Originals stay intact. Adjustments can be undone or saved as presets for other photos.
 
@@ -36,7 +36,7 @@ Create a `.ccrawagent` project and import photos or folders to begin scanning. T
 
 By default, Agent reuses the model configuration from the photo-editing instructions panel, so you do not need a second conversation API key. The conversation provider must support tool calling. Conversations send instructions, bounded project summaries and tool results; image analysis runs locally.
 
-Without a configured LLM, you can still scan photos, review organization suggestions, use local search and get editing recommendations. Local semantic search and anonymous person clustering require approximately 186 MiB of checksum-verified models, available through **Local Models** (本地模型). Model files are stored separately from the source code.
+Without a configured LLM, you can still scan photos, review organization suggestions, use local search and get editing recommendations. Local semantic search and anonymous person clustering require approximately 186 MiB of checksum-verified models, available through **Settings → AI and services → Local models** (设置 → AI 与服务 → 本地模型). Model files are stored separately from the source code.
 
 Person detection and clustering provide candidate signals. The number of people in an image is unknown by default and can be verified through **Annotate People / Tags** (标注人数 / 标签). Strict person-count queries exclude photos with unknown counts. Events use EXIF capture times; missing capture times are not replaced with file modification times. For complex Chinese searches, use an Agent conversation to translate the request into search filters and an English semantic query. See the [Photo Agent guide](docs/photo-agent.md) for feature boundaries and project storage details.
 
@@ -52,25 +52,28 @@ External tool-calling agents can connect over standard stdio MCP to the same pho
 
 The image updates as you drag sliders, edit curves or move the color-grading wheels. Fit the image to the window to review the overall result, or switch to 100% to inspect original-resolution pixels in the visible area. Use the original view and before/after comparison to check your adjustments.
 
-Image processing runs separately from interface interaction, and consecutive inputs are coalesced. A CPU supports everyday editing; DirectML, CUDA or model inference acceleration can be enabled depending on your environment. Actual responsiveness depends on image dimensions, adjustment types and hardware.
+Image processing runs separately from interface interaction, and consecutive inputs are coalesced. Automatic acceleration selects a compute path according to image size, active tools and cached results. It supports OpenCL neighbourhood filters and optional DirectML or CUDA pixel processing and model inference. The editor shows the GPU model, dedicated memory and the actual processing path. Responsiveness depends on image dimensions, adjustment types and hardware.
 
 Professional controls and composite masks preview changes as you make them. Confirm a composite-mask edit to keep it as one undo step, or cancel to restore the previous state. Preview requests are scheduled at up to 60 Hz without reducing the working preview resolution during a drag; the 100% view updates visible original pixels. Actual image refresh rates depend on processing time. Decoded photos, curve interpolation, filter inputs and color stages reuse bounded caches to avoid repeated work.
 
 ### Editing tools in one place
+
+The editor uses six categories: **Tone, Color, Detail, Composition, Local and Effects**. Professional tools sit beside their related editing operations in collapsible sections. Color includes white balance, grading, black-and-white mixing, point color, calibration and profiles; Composition includes cropping, optics and perspective; Local includes masks, healing and red-eye correction. Reset the current section directly, or use **Photo → Adjustments → Reset all adjustments** for the whole photo. Both support undo.
 
 | Tool | What you can do |
 |---|---|
 | Light | Adjust exposure, contrast, shadows, highlights, black and white points, and curves |
 | Color | Control white balance, HSL and color grading for overall and selective color adjustments |
 | Detail | Sharpen, denoise and optionally use AI detail processing |
-| Masks | Apply local adjustments with brushes, gradients and optional automatic selections |
-| Crop | Adjust composition and aspect ratio; drag inside the crop rectangle to move it horizontally or vertically without changing its size |
-| Retouch and effects | Apply retouching, image effects and watermarks |
-| Selection and export | Use catalogs, synchronized adjustments, presets, snapshots and batch export |
+| Composition | Crop and rotate, correct lens distortion and perspective; move a crop rectangle without changing its size |
+| Local | Masks, brushes, gradients, automatic selections, healing and red-eye correction |
+| Effects | Vignetting, film grain, template watermarks and margins |
 
 After drawing a crop rectangle, drag inside it to reposition it. Drag outside it to draw a new rectangle. Click **Confirm Crop** (确认裁切) or press Enter to apply it.
 
-**Smart Watermark** (智能水印) in the watermark panel can detect the camera brand and arrange the camera model, lens, focal length, aperture, shutter speed, ISO and capture time. Choose a brand automatically or manually; missing parameters are omitted. Previews, single-image exports and batch exports share the same watermark pipeline.
+Watermarks use semi-utils templates and composable processors. The default, `standard2`, combines rounded corners, shadow, spacing and capture parameters. Choose from seven current templates and legacy `Layout.Type` layouts, then adjust text, fonts, colors, logos, margins, alignment, blur and shadows through visual controls. Template watermarks replace the former native plain borders; older project settings migrate when opened.
+
+Preview, single-image export and batch export share the same processing pipeline. Layout uses the final photo dimensions before scaling for display, while photograph data retains floating-point precision. See [watermark templates](docs/watermark.md) for details.
 
 ### Save adjustments and reuse a look
 
@@ -161,7 +164,9 @@ Replace the example path with the actual download location. If your complete off
 
 ### Optional GPU acceleration
 
-The default dependencies provide a CPU runtime. For a Windows GPU environment, use `requirements-directml.txt`; for NVIDIA CUDA, use `requirements-gpu.txt`. Follow the instructions in the relevant file to remove other ONNX Runtime distributions first. Keep only one ONNX Runtime distribution installed in each environment. Driver and system requirements are documented in the dependency files and the [Windows build guide](docs/releasing.md).
+The default dependencies provide a CPU runtime. When the driver and OpenCV support OpenCL, automatic mode can also accelerate suitable neighbourhood filters without installing CUDA packages. Clarity, texture and sharpening can run as a combined operation to reduce device transfers. Small images and cached results retain the CPU fast path. Selecting CPU manually disables automatic GPU routing for photo processing. Device and execution details are available under Settings → Performance & storage → Compute.
+
+For additional ONNX acceleration, use `requirements-directml.txt` on Windows or `requirements-gpu.txt` for NVIDIA CUDA. Follow the instructions in the relevant file to remove other ONNX Runtime distributions first. Keep only one ONNX Runtime distribution installed in each environment. Driver and system requirements are documented in the dependency files and the [Windows build guide](docs/releasing.md).
 
 ## Data and open source
 

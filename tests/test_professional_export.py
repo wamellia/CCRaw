@@ -411,11 +411,15 @@ def test_export_cancel_after_encode_preserves_destination(tmp_path):
 
 def test_export_watermark_preset_is_validated_and_keeps_image_precision(tmp_path):
     from ccraw import export_presets as ep
+    from ccraw import watermark
 
     source = np.full((20, 30, 3), 0.12345, np.float32)
-    opts = dict(
-        format='tiff', bit_depth=16, watermark={'enabled': True, 'sides': ['bottom'], 'fields': []}
+    settings = watermark.defaults()
+    settings.update(
+        enabled=True, template='standard1', pipeline=watermark.template_pipeline('standard1')
     )
+    settings['pipeline'][0]['bottom_margin'] = 3
+    opts = dict(format='tiff', bit_depth=16, watermark=settings)
     ep.export_rgb(tmp_path / 'border.tif', source, opts, icc_profile=icc())
     output = tifffile.imread(tmp_path / 'border.tif')
     assert output.shape == (23, 30, 3)
@@ -563,6 +567,13 @@ def test_safe_filename_never_overwrites_source_and_handles_same_directory(tmp_pa
 
 def test_external_handoff_honors_professional_output_settings(tmp_path):
     from ccraw.external_editor import prepare_handoff
+    from ccraw import watermark
+
+    settings = watermark.defaults()
+    settings.update(
+        enabled=True, template='standard1', pipeline=watermark.template_pipeline('standard1')
+    )
+    settings['pipeline'][0]['bottom_margin'] = 3
 
     source = tmp_path / 'source.nef'
     source.write_bytes(b'original')
@@ -576,7 +587,7 @@ def test_external_handoff_honors_professional_output_settings(tmp_path):
             'format': 'tiff',
             'bit_depth': 16,
             'resolution': 144,
-            'watermark': {'enabled': True, 'sides': ['bottom'], 'fields': []},
+            'watermark': settings,
         },
     )
     with tifffile.TiffFile(handoff.path) as image:

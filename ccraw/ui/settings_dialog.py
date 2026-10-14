@@ -22,13 +22,17 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
+    QStackedWidget,
     QTabWidget,
+    QTreeWidget,
+    QTreeWidgetItem,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -45,16 +49,53 @@ from . import theme
 
 _DIALOGS = weakref.WeakKeyDictionary()
 _BINDINGS = weakref.WeakSet()
-PAGES = [
-    ('general', '通用'),
-    ('appearance', '外观与语言'),
-    ('performance', '性能与存储'),
-    ('import', '导入'),
-    ('display', '显示与色彩'),
-    ('ai', 'AI 与服务'),
-    ('external', '外部编辑'),
-    ('recovery', '保存与恢复'),
+SETTINGS_DIRECTORY = [
+    ('工作区', [('general', '常规'), ('appearance', '外观与语言'), ('project', '工程偏好')]),
+    ('照片与色彩', [('import', '导入'), ('display', '显示与色彩')]),
+    (
+        '性能与存储',
+        [('performance', '计算'), ('preview_cache', '预览与缓存'), ('maintenance', '维护与诊断')],
+    ),
+    (
+        'AI 与服务',
+        [
+            ('ai', '对话与修图'),
+            ('generation', '图像生成'),
+            ('voice', '语音'),
+            ('local_models', '本地模型'),
+        ],
+    ),
+    ('工作流', [('external', '外部编辑')]),
+    ('保存与恢复', [('autosave', '自动保存'), ('backup', '工程备份'), ('recovery', '会话恢复')]),
 ]
+PAGES = [page for _, children in SETTINGS_DIRECTORY for page in children]
+PAGE_ALIASES = {'models': 'ai', 'compute': 'performance', 'cache': 'preview_cache'}
+FIELD_PAGES = {
+    'performance.thumbnail_disk_mib': 'preview_cache',
+    'performance.preview_limit': 'preview_cache',
+    'recovery.autosave': 'autosave',
+    'recovery.delay_ms': 'autosave',
+    'recovery.backups': 'backup',
+}
+PROJECT_PAGES = frozenset(('import', 'project'))
+PAGE_GROUPS = {
+    'general': '启动与确认',
+    'appearance': '界面偏好',
+    'project': '浏览与代理',
+    'import': '默认风格',
+    'display': '色彩管理',
+    'performance': '计算资源',
+    'preview_cache': '预览预算',
+    'maintenance': '缓存维护',
+    'ai': '模型服务',
+    'generation': '生成服务',
+    'voice': '语音输入',
+    'local_models': '模型安装',
+    'external': '交换设置',
+    'autosave': '自动保存策略',
+    'backup': '备份策略',
+    'recovery': '可恢复会话',
+}
 
 
 def _directory_bytes(directory):
@@ -113,10 +154,11 @@ class SettingsDialog(QDialog):
         self.model_finished.connect(self._model_finished)
         self.project_getter = project_getter or (lambda: None)
         self.setWindowTitle('设置')
-        self.resize(880, 680)
+        self.resize(1040, 740)
         self.fields = {}
         layout = QVBoxLayout(self)
         scope_row = QHBoxLayout()
+        scope_row.addWidget(QLabel('设置范围'))
         self.scope = QComboBox()
         self.scope.addItem('应用默认值', 'application')
         if self.project_getter() is not None:
@@ -127,26 +169,63 @@ class SettingsDialog(QDialog):
         share.clicked.connect(self.share)
         scope_row.addWidget(share)
         layout.addLayout(scope_row)
-        self.tabs = QTabWidget()
-        self.tabs.setUsesScrollButtons(True)
-        layout.addWidget(self.tabs, 1)
+        self.scope_hint = QLabel()
+        self.scope_hint.setWordWrap(True)
+        self.scope_hint.setObjectName('subtle')
+        layout.addWidget(self.scope_hint)
+        content = QSplitter(Qt.Orientation.Horizontal)
+        content.setObjectName('settings-content')
+        content.setChildrenCollapsible(False)
+        self.navigation = QTreeWidget()
+        self.navigation.setObjectName('settings-navigation')
+        self.navigation.setAccessibleName('设置目录')
+        self.navigation.setHeaderHidden(True)
+        self.navigation.setRootIsDecorated(True)
+        self.navigation.setIndentation(18)
+        self.navigation.setMinimumWidth(180)
+        content.addWidget(self.navigation)
+        # Preserve the current-page API used by existing settings entry points.
+        self.tabs = QStackedWidget()
+        self.tabs.setObjectName('settings-pages')
+        content.addWidget(self.tabs)
+        content.setStretchFactor(1, 1)
+        content.setSizes([210, 800])
+        layout.addWidget(content, 1)
         self.pages = {}
+        self.page_layouts = {}
+        self.navigation_items = {}
+        for group_title, children in SETTINGS_DIRECTORY:
+            group = QTreeWidgetItem(self.navigation, [group_title])
+            group.setFlags(group.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            group.setExpanded(True)
+            for key, title in children:
+                item = QTreeWidgetItem(group, [title])
+                item.setData(0, Qt.ItemDataRole.UserRole, key)
+                self.navigation_items[key] = item
         for key, title in PAGES:
             page = QScrollArea()
             page.setWidgetResizable(True)
             page.setProperty('settings_page', key)
             body = QWidget()
-            form = QFormLayout(body)
-            form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+            body_layout = QVBoxLayout(body)
+            heading = QLabel(title)
+            heading.setObjectName('settings-page-title')
+            body_layout.addWidget(heading)
+            self.page_layouts[key] = body_layout
+            form = self._group(key, PAGE_GROUPS[key])
+            body_layout.addStretch()
             page.setWidget(body)
-            self.tabs.addTab(page, title)
+            self.tabs.addWidget(page)
             self.pages[key] = (page, form)
+        theme.style_hierarchy(self.navigation)
+        self.navigation.currentItemChanged.connect(self._navigate)
+        self.tabs.currentChanged.connect(self._sync_navigation)
         self._build()
         self.status = QLabel()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
         footer = QHBoxLayout()
-        reset = QPushButton('恢复当前页默认值')
+        reset = self.reset_button = QPushButton('恢复当前页默认值')
         reset.clicked.connect(self.reset_page)
         footer.addWidget(reset)
         footer.addStretch()
@@ -162,10 +241,61 @@ class SettingsDialog(QDialog):
         clamp_window(self)
         i18n.localize_window(self, self.service.read()['appearance']['language'])
 
+    def _group(self, page, title):
+        group = QGroupBox(title)
+        group.setProperty('settings_group', page)
+        form = QFormLayout(group)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        form.setRowWrapPolicy(QFormLayout.RowWrapPolicy.WrapLongRows)
+        body = self.page_layouts[page]
+        if body.count() and body.itemAt(body.count() - 1).spacerItem():
+            body.insertWidget(body.count() - 1, group)
+        else:
+            body.addWidget(group)
+        return form
+
+    def _navigate(self, item, previous=None):
+        if item is not None:
+            key = item.data(0, Qt.ItemDataRole.UserRole)
+            if key in self.pages:
+                self.tabs.setCurrentWidget(self.pages[key][0])
+
+    def _sync_navigation(self, *_):
+        key = self.tabs.currentWidget().property('settings_page')
+        self.navigation.setCurrentItem(self.navigation_items[key])
+        if hasattr(self, 'reset_button'):
+            self.reset_button.setEnabled(key not in ('maintenance', 'local_models', 'recovery'))
+
+    def select_page(self, key):
+        key = PAGE_ALIASES.get(key, key)
+        if self.scope.currentData() == 'project' and key not in PROJECT_PAGES:
+            key = 'import'
+        if key in self.pages:
+            self.tabs.setCurrentWidget(self.pages[key][0])
+            self._sync_navigation()
+
+    def _update_scope(self):
+        project = self.scope.currentData() == 'project'
+        for key, item in self.navigation_items.items():
+            item.setHidden(project and key not in PROJECT_PAGES)
+        for index in range(self.navigation.topLevelItemCount()):
+            item = self.navigation.topLevelItem(index)
+            item.setHidden(all(item.child(i).isHidden() for i in range(item.childCount())))
+        i18n.set_message(
+            self.scope_hint,
+            (
+                '仅覆盖当前工程的导入与工程偏好；其他设置使用应用默认值。'
+                if project
+                else '应用默认值用于所有工作区；工程可单独覆盖导入与工程偏好。'
+            ),
+        )
+        self.select_page(self.tabs.currentWidget().property('settings_page'))
+
     def _field(self, section, key, label, widget):
-        self.fields[section + '.' + key] = widget
-        self.pages[section][1].addRow(label, widget)
-        widget.setAccessibleName(label)
+        path = section + '.' + key
+        self.fields[path] = widget
+        self.pages[FIELD_PAGES.get(path, section)][1].addRow(label, widget)
+        widget.setAccessibleName(label or widget.text())
         return widget
 
     def _combo(self, section, key, label, choices):
@@ -190,7 +320,7 @@ class SettingsDialog(QDialog):
         self._check('general', 'offer_recovery', '启动时提示恢复会话')
         reset_layout = QPushButton('恢复默认布局')
         reset_layout.clicked.connect(self.reset_layout)
-        self.pages['general'][1].addRow('', reset_layout)
+        self._group('general', '工作区布局').addRow('', reset_layout)
         confirmation = self._check('general', 'confirm_remote', '外部执行前确认费用与上传')
         confirmation.setProperty('settings_readonly', True)
         confirmation.setEnabled(False)
@@ -221,38 +351,41 @@ class SettingsDialog(QDialog):
         self.cache = CacheManager(busy=_busy)
         self.storage = QLabel()
         self.storage.setWordWrap(True)
-        self.pages['performance'][1].addRow('缓存目录', self.storage)
+        self._group('preview_cache', '存储用量').addRow('缓存目录', self.storage)
+        maintenance = self.pages['maintenance'][1]
         clear = QPushButton('清理缓存')
         clear.clicked.connect(self.clear_cache)
-        self.pages['performance'][1].addRow('', clear)
+        maintenance.addRow('', clear)
+        diagnostics_form = self._group('maintenance', '诊断与任务')
         diagnostics = QPushButton('复制诊断')
         diagnostics.clicked.connect(self.copy_diagnostics)
-        self.pages['performance'][1].addRow('', diagnostics)
+        diagnostics_form.addRow('', diagnostics)
         tasks = QPushButton('任务')
         from .task_center import show_tasks
 
         tasks.clicked.connect(lambda: show_tasks(self.owner() or self))
-        self.pages['performance'][1].addRow('', tasks)
+        diagnostics_form.addRow('', tasks)
         logs = QPushButton('打开日志')
         logs.clicked.connect(
             lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(host.log_folder())))
         )
-        self.pages['performance'][1].addRow('', logs)
+        diagnostics_form.addRow('', logs)
         presets = [('无', 'none'), ('中性', 'neutral'), ('鲜艳', 'vivid'), ('黑白', 'monochrome')]
         self._combo('import', 'raw_preset', 'RAW 默认风格', presets)
         self._combo('import', 'other_preset', '其他图片默认风格', presets)
         self.rules = QTextEdit()
         self.rules.setMaximumHeight(130)
-        self.pages['import'][1].addRow('按相机规则', self.rules)
+        self._group('import', '相机规则').addRow('按相机规则', self.rules)
         self.rules.setPlaceholderText('[{"camera":"Exact Camera","preset":"neutral"}]')
         self.keywords = QLineEdit()
         self.creator, self.copyright = QLineEdit(), QLineEdit()
-        self.pages['import'][1].addRow('关键词', self.keywords)
-        self.pages['import'][1].addRow('作者', self.creator)
-        self.pages['import'][1].addRow('版权', self.copyright)
+        metadata = self._group('import', '默认元数据')
+        metadata.addRow('关键词', self.keywords)
+        metadata.addRow('作者', self.creator)
+        metadata.addRow('版权', self.copyright)
         preview = QPushButton('实际导入预览')
         preview.clicked.connect(self.import_preview)
-        self.pages['import'][1].addRow('', preview)
+        metadata.addRow('', preview)
         for key, label, choices in (
             (
                 'proxy_policy',
@@ -270,7 +403,7 @@ class SettingsDialog(QDialog):
                 widget.addItem(title, value)
             self.fields['project.' + key] = widget
             widget.setAccessibleName(label)
-            self.pages['import'][1].addRow(label, widget)
+            self.pages['project'][1].addRow(label, widget)
         self._check('display', 'automatic', '自动检测')
         self._text('display', 'profile_path', '显示器 ICC')
         browse = QPushButton('选择 ICC…')
@@ -293,21 +426,28 @@ class SettingsDialog(QDialog):
 
         self.ai = ProviderDialog(self, nl_edit.load_settings())
         self.generation = GenerationSettings(self, image_generation.load_settings())
-        ai_tabs = QTabWidget()
-        for child, title in ((self.ai, '模型设置'), (self.generation, '生成设置')):
+        for child, key in ((self.ai, 'ai'), (self.generation, 'generation')):
             child.setWindowFlags(Qt.WindowType.Widget)
             child.setMinimumWidth(0)
             for box in child.findChildren(QDialogButtonBox):
                 box.hide()
-            ai_tabs.addTab(child, title)
-        self.ai_tabs = ai_tabs
-        self.pages['ai'][1].addRow(ai_tabs)
+            self.pages[key][1].addRow(child)
+        # These remain ProviderDialog references so its existing values/save path
+        # owns voice persistence. takeRow avoids deleting the live controls.
+        provider_form = self.ai.findChild(QFormLayout)
+        voice_form = self.pages['voice'][1]
+        for widget in (self.ai.voice, self.ai.auto_send):
+            row = provider_form.takeRow(widget)
+            if row.labelItem is not None and row.labelItem.widget() is not None:
+                voice_form.addRow(row.labelItem.widget(), widget)
+            else:
+                voice_form.addRow(widget)
         self.local_models = QLabel()
         self.local_models.setWordWrap(True)
-        self.pages['ai'][1].addRow('本地模型', self.local_models)
+        self.pages['local_models'][1].addRow('本地模型', self.local_models)
         self.install_models_button = QPushButton('下载本地模型')
         self.install_models_button.clicked.connect(self.install_models)
-        self.pages['ai'][1].addRow('', self.install_models_button)
+        self.pages['local_models'][1].addRow('', self.install_models_button)
         self._text('external', 'executable', '可执行程序')
         external_browse = QPushButton('选择程序…')
         external_browse.clicked.connect(self.browse_executable)
@@ -330,7 +470,7 @@ class SettingsDialog(QDialog):
         backup = self.backup_button = QPushButton('备份当前工程')
         backup.clicked.connect(self.backup)
         backup.setEnabled(self.project_getter() is not None)
-        self.pages['recovery'][1].addRow('', backup)
+        self.pages['backup'][1].addRow('', backup)
         self.sessions = QLabel()
         self.sessions.setProperty('user_content', True)
         self.sessions.setWordWrap(True)
@@ -373,6 +513,8 @@ class SettingsDialog(QDialog):
             self.copyright,
             self.ai,
             self.generation,
+            self.ai.voice,
+            self.ai.auto_send,
         ):
             widget.setEnabled(
                 project is None
@@ -389,9 +531,22 @@ class SettingsDialog(QDialog):
             'CUDAExecutionProvider': 'GPU · CUDA',
             'TensorrtExecutionProvider': 'GPU · TensorRT',
         }.get(provider, provider)
-        i18n.set_message(
-            self.device, '\n'.join(value for value in (active, device, detail, warning) if value)
+        owner = self.owner()
+        backend = getattr(owner, 'backend', None)
+        if backend is None:
+            # Welcome / Agent windows have no photo renderer. Hardware inventory
+            # does not initialize OpenCL or construct an ONNX render session.
+            mode = self.fields['performance.backend'].currentData()
+            backend = getattr(self, '_device_backend', None)
+            if backend is None or backend.mode != mode:
+                backend = self._device_backend = engine.Backend(mode=mode)
+        tooltip = getattr(backend, 'device_tooltip', None)
+        device_text = (
+            tooltip()
+            if callable(tooltip)
+            else '\n'.join(value for value in (active, device, detail, warning) if value)
         )
+        i18n.set_message(self.device, device_text)
         usage = self.cache.usage()
         from ..photo_agent import models
 
@@ -434,6 +589,7 @@ class SettingsDialog(QDialog):
             )
         self.restore_button.setEnabled(bool(sessions))
         self.discard_button.setEnabled(bool(sessions))
+        self._update_scope()
 
     def _refresh_local_models(self):
         from ..photo_agent import models
@@ -515,37 +671,43 @@ class SettingsDialog(QDialog):
 
     def reset_page(self):
         key = self.tabs.currentWidget().property('settings_page')
-        if key == 'ai':
+        if self.scope.currentData() == 'project' and key not in PROJECT_PAGES:
+            return
+        if key in ('maintenance', 'local_models', 'recovery'):
+            return
+        if key in ('ai', 'voice', 'generation'):
             defaults = nl_edit.default_settings()
-            self.ai.current = None
-            self.ai.settings = defaults
-            self.ai.provider.setCurrentIndex(self.ai.provider.findData(defaults['provider']))
-            self.ai.provider_changed()
-            self.ai.timeout.setValue(defaults['timeout'])
-            self.ai.attach.setChecked(defaults['attach_image'])
-            self.ai.auto_send.setChecked(defaults['auto_send'])
-            self.ai.voice.setCurrentIndex(self.ai.voice.findData(defaults['voice_language']))
-            self.ai.reasoning.setCurrentIndex(self.ai.reasoning.findData(defaults['reasoning']))
-            generation = image_generation.default_settings()
-            self.generation.url.setText(generation['base_url'])
-            self.generation.model.setText(generation['model'])
-            self.generation.key.setText(generation['key'])
-            self.generation.timeout.setValue(generation['timeout'])
-            self.generation.watermark.setChecked(generation['watermark'])
+            if key == 'ai':
+                self.ai.current = None
+                self.ai.settings = defaults
+                self.ai.provider.setCurrentIndex(self.ai.provider.findData(defaults['provider']))
+                self.ai.provider_changed()
+                self.ai.timeout.setValue(defaults['timeout'])
+                self.ai.attach.setChecked(defaults['attach_image'])
+                self.ai.reasoning.setCurrentIndex(self.ai.reasoning.findData(defaults['reasoning']))
+            elif key == 'voice':
+                self.ai.auto_send.setChecked(defaults['auto_send'])
+                self.ai.voice.setCurrentIndex(self.ai.voice.findData(defaults['voice_language']))
+            else:
+                generation = image_generation.default_settings()
+                self.generation.url.setText(generation['base_url'])
+                self.generation.model.setText(generation['model'])
+                self.generation.key.setText(generation['key'])
+                self.generation.timeout.setValue(generation['timeout'])
+                self.generation.watermark.setChecked(generation['watermark'])
             self.status.setText(i18n.translate('默认值已恢复；点击应用保存'))
             return
-        if self.scope.currentData() == 'project' and key != 'import':
-            return
+        patch = {}
+        for path in self.fields:
+            section, name = path.split('.')
+            if FIELD_PAGES.get(path, section) == key:
+                patch.setdefault(section, {})[name] = copy.deepcopy(DEFAULTS[section][name])
+        if key == 'import':
+            patch['import'] = copy.deepcopy(DEFAULTS['import'])
         if self.scope.currentData() == 'project':
-            self.service.update_project(
-                self.project_getter(),
-                {
-                    'import': copy.deepcopy(DEFAULTS['import']),
-                    'project': copy.deepcopy(DEFAULTS['project']),
-                },
-            )
+            self.service.update_project(self.project_getter(), patch)
         else:
-            self.service.reset(key)
+            self.service.update(patch)
         self.load()
 
     def reset_layout(self):
@@ -679,6 +841,12 @@ class SettingsDialog(QDialog):
         self.install_models_button.setText(i18n.translate('下载本地模型'))
         self.status.setText(error or i18n.translate('本地模型校验完成'))
         self._refresh_local_models()
+        if not error:
+            for binding in tuple(_BINDINGS):
+                window = binding.window()
+                if window is not None and isValid(window) and hasattr(window, 'models'):
+                    # Keep in-flight scans on their current model/session snapshot.
+                    window._models_refresh_pending = True
 
     def restore_session(self):
         identifier = self.recovery_session.currentData()
@@ -738,14 +906,10 @@ def show_settings(window, page='general', *, service=None, project_getter=None):
         dialog.scope.blockSignals(False)
         dialog.backup_button.setEnabled(project is not None)
         dialog.load()
-    aliases = {'models': 'ai', 'generation': 'ai', 'local_models': 'ai'}
-    key = aliases.get(page, page)
-    for index in range(dialog.tabs.count()):
-        if dialog.tabs.widget(index).property('settings_page') == key:
-            dialog.tabs.setCurrentIndex(index)
-            break
-    if page == 'generation':
-        dialog.ai_tabs.setCurrentIndex(1)
+    requested_page = PAGE_ALIASES.get(page, page)
+    if requested_page in dialog.pages and requested_page not in PROJECT_PAGES:
+        dialog.scope.setCurrentIndex(dialog.scope.findData('application'))
+    dialog.select_page(requested_page)
     dialog.show()
     dialog.raise_()
     dialog.activateWindow()
@@ -810,12 +974,17 @@ class WindowSettingsBinding(QObject):
 
     @staticmethod
     def _controls(window, control_type, prefix):
-        return {
-            widget.objectName() or f'{prefix}-{index}': widget
-            for index, widget in enumerate(
-                widget for widget in window.findChildren(control_type) if widget.window() is window
-            )
-        }
+        result = {}
+        anonymous = 0
+        for widget in window.findChildren(control_type):
+            if widget.window() is not window:
+                continue
+            name = widget.objectName()
+            if not name:
+                name = f'{prefix}-{anonymous}'
+                anonymous += 1
+            result[name] = widget
+        return result
 
     def workspace_snapshot(self):
         window = self.window()

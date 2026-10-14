@@ -538,7 +538,9 @@ def warp_mask(alpha, pro):
 
 
 def _blur(plane, radius):
-    return cv2.GaussianBlur(plane, (0, 0), max(0.15, radius), borderType=cv2.BORDER_REFLECT_101)
+    from ..gpu_spatial import gaussian
+
+    return gaussian(plane, max(0.15, radius), borderType=cv2.BORDER_REFLECT_101)
 
 
 def _detail(rgb, settings, scale, space='sRGB', cache=None, basis_key=None):

@@ -318,8 +318,7 @@ class EditingMixin:
 
     def update_overlay(self, *_):
         if (
-            self.tabs.currentIndex() == 9
-            and self.professional_editor.tabs.currentIndex() == 5
+            self.editor_tool_active('point_color')
             and self.professional_editor.range_preview.isChecked()
             and not self.comparing
             and not self.split_check.isChecked()
@@ -329,7 +328,7 @@ class EditingMixin:
         if (
             self.source is not None
             and mask
-            and self.tabs.currentIndex() == 4
+            and self.editor_tool_active('masks')
             and self.overlay_check.isChecked()
             and not self.comparing
             and not self.split_check.isChecked()
@@ -348,8 +347,7 @@ class EditingMixin:
     def update_tool(self, *_):
         self.canvas.grid_visible = (
             hasattr(self, 'professional_editor')
-            and self.tabs.currentIndex() == 9
-            and self.professional_editor.tabs.currentIndex() == 1
+            and self.editor_tool_active('geometry')
             and self.professional_editor.geometry_grid.isChecked()
         )
         if self.comparing or self.split_check.isChecked():
@@ -357,25 +355,23 @@ class EditingMixin:
         elif (
             hasattr(self, 'color_region_button')
             and self.color_region_button.isChecked()
-            and self.tabs.currentIndex() == 4
+            and self.editor_tool_active('masks')
         ):
             self.canvas.tool = 'color'
-        elif (
-            self.tabs.currentIndex() == 9
-            and self.professional_editor.tabs.currentIndex() == 4
-            and self.professional_editor.bw_target.isChecked()
-        ):
+        elif self.editor_tool_active('bw_mixer') and self.professional_editor.bw_target.isChecked():
             self.canvas.tool = 'bw-target'
-        elif getattr(self, '_professional_sample', None) and self.tabs.currentIndex() == 9:
+        elif getattr(self, '_professional_sample', None) and (
+            self.editor_tool_active('point_color') or self.editor_tool_active('red_eye')
+        ):
             self.canvas.tool = 'color'
         elif self.wb_sampling:
             self.canvas.tool = 'sample'
-        elif self.tabs.currentIndex() == 8:
+        elif self.editor_tool_active('retouch'):
             self.canvas.tool = 'heal' if self.retouch_tool.currentIndex() == 0 else 'clone'
             self.canvas.brush_radius = self.retouch_controls['size'].spin.value() / 200
-        elif self.tabs.currentIndex() == 5:
+        elif self.editor_tool_active('crop'):
             self.canvas.tool = 'view' if self.final_view.isChecked() else 'crop'
-        elif self.tabs.currentIndex() == 4 and self.selected_mask():
+        elif self.editor_tool_active('masks') and self.selected_mask():
             mask = self.selected_mask()
             self.canvas.brush_radius = self.brush_size.spin.value() / 200
             self.canvas.tool = (
@@ -403,13 +399,13 @@ class EditingMixin:
             return
         if self.canvas.tool == 'crop' and self.canvas.start is not None:
             self.canvas.mouseReleaseEvent(None)
-        if self.tabs.currentIndex() == 5:
+        if self.editor_tool_active('crop'):
             self.final_view.setChecked(False)
-        if self.tabs.currentIndex() in (4, 5, 8):
+        if self.editor_groups.active in ('masks', 'crop', 'retouch'):
             self.split_check.setChecked(False)
-        if self.wb_sampling and self.tabs.currentIndex() != 0:
+        if self.wb_sampling and not self.editor_tool_active('white_balance'):
             self.wb_button.setChecked(False)
-        if self.tabs.currentIndex() == 2:
+        if self.editor_tool_active('watermark'):
             self.watermark_editor.update_preview()
         self.update_tool()
         self.update_overlay()
@@ -460,7 +456,7 @@ class EditingMixin:
         ][index]
 
     def confirm_crop(self):
-        if self.source is None or self.tabs.currentIndex() != 5:
+        if self.source is None or not self.editor_tool_active('crop'):
             return
         self.canvas.mouseReleaseEvent(None)
         self.final_view.setChecked(True)
@@ -491,13 +487,11 @@ class EditingMixin:
             compute.state.report(
                 'CPUExecutionProvider', detail=f'{performance.THREADS} 线程 · 手动 CPU 模式'
             )
-        self.statusBar().refresh_mode()
-        self.backend_label.setText(self.backend.name)
-        self.backend_label.setToolTip(self.backend.warning)
+        self.refresh_backend_status()
         self.changed()
 
     def reset_edits(self):
-        if self.source is not None:
+        if self.source is not None and not self.work.busy(A.LOADING, A.AI):
             self._preview_epoch += 1
             self.commit()
             self.edits = model.recipe()
@@ -511,6 +505,77 @@ class EditingMixin:
             self.refresh()
             self.changed()
             self.commit()
+
+    def reset_editor_section(self):
+        """Reset exactly the selected operation, retaining other recipe groups."""
+        if (
+            self.source is None
+            or self.editor_groups.active is None
+            or self.work.busy(A.LOADING, A.AI)
+        ):
+            return
+        key = self.editor_groups.active
+        defaults = model.recipe()
+        self._preview_epoch += 1
+        self.commit()
+        adjustment_groups = {
+            'light': ('exposure', 'contrast', 'shadows', 'highlights', 'blacks', 'whites'),
+            'color': ('saturation', 'vibrance'),
+            'detail': ('dehaze', 'clarity', 'texture', 'sharpness', 'denoise', 'color_noise'),
+            'white_balance': ('temperature', 'tint'),
+        }
+        for adjustment in adjustment_groups.get(key, ()):
+            self.edits['adjustments'][adjustment] = defaults['adjustments'][adjustment]
+        recipe_groups = {
+            'light': ('tone_curve',),
+            'color': ('hsl', 'monochrome'),
+            'curves': ('curves', 'curve_mode'),
+            'grading': ('grading',),
+            'effects': ('effects',),
+            'watermark': ('watermark',),
+            'crop': ('crop', 'rotation', 'straighten'),
+            'masks': ('masks',),
+            'retouch': ('retouch',),
+            'process': ('process',),
+            'white_balance': ('wb_gain',),
+        }
+        for field in recipe_groups.get(key, ()):
+            self.edits[field] = copy.deepcopy(defaults[field])
+        if key == 'white_balance':
+            self.edits['white_balance'] = copy.deepcopy(
+                self.info.get('white_balance', defaults['white_balance'])
+            )
+        if key == 'light':
+            self.edits['develop'] = copy.deepcopy(self.info.get('develop', defaults['develop']))
+        professional_group = {
+            'optics': 'optics',
+            'geometry': 'geometry',
+            'calibration': 'calibration',
+            'professional_detail': 'detail',
+            'bw_mixer': 'bw_mixer',
+            'point_color': 'point_color',
+            'profile': 'profile',
+            'red_eye': 'red_eye',
+        }.get(key)
+        if professional_group is not None:
+            self.edits['professional'][professional_group] = copy.deepcopy(
+                defaults['professional'][professional_group]
+            )
+            if key == 'optics':
+                self.edits['professional']['lensfun'] = None
+                self.professional_editor.lens_status.setText('镜头标定已移除；手动光学控制已重置。')
+        if key == 'masks':
+            self.current_mask = -1
+        if key == 'retouch':
+            self.clear_clone_source()
+        if key == 'crop':
+            self.final_view.setChecked(False)
+        self._professional_sample = None
+        self.wb_button.setChecked(False)
+        self.clear_preset_selection()
+        self.refresh()
+        self.changed()
+        self.commit()
 
     def undo(self, delta):
         self._preview_epoch += 1

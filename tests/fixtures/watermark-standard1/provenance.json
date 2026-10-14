@@ -1,0 +1,55 @@
+{
+  "source": "https://github.com/leslievan/semi-utils",
+  "commit": "b1cf1ce655e9452a78a88f465d4387f84cf6740e",
+  "template": "config/templates/标准水印.json",
+  "adapter": "tests/watermark_reference_adapter.py",
+  "pillow": "12.3.0",
+  "fixture_exif": {
+    "CameraModelName": "EOS R6",
+    "LensModel": "RF 35mm F1.8",
+    "FocalLengthIn35mmFormat": "35 mm",
+    "FNumber": "2.8",
+    "ShutterSpeed": "1/500",
+    "ISO": "800",
+    "DateTimeOriginal": "2025-07-12 18:05:06",
+    "Make": "sony"
+  },
+  "comparisons": [
+    {
+      "size": [
+        1600,
+        1067
+      ],
+      "brand": "canon",
+      "max_error": 0,
+      "mismatched_values": 0,
+      "footer_height": 128
+    },
+    {
+      "size": [
+        1100,
+        1600
+      ],
+      "brand": "nikon",
+      "max_error": 0,
+      "mismatched_values": 0,
+      "footer_height": 192
+    },
+    {
+      "size": [
+        1920,
+        640
+      ],
+      "brand": "sony",
+      "max_error": 0,
+      "mismatched_values": 0,
+      "footer_height": 76
+    }
+  ],
+  "source_sha256": {
+    "processor/filters.py": "f6743201dd9931106e20c17242f331423fece06b4609231dc7111a650c4841af",
+    "processor/generators.py": "e17ea0d0ecfc3dffcc65f835164603f07b0bcaa4731f6f70893d45b0eeff02c5",
+    "processor/mergers.py": "0aae9a7a9750e4412cc32007074023406c972d6fe6bc5347a631a14b90db34ff",
+    "config/templates/标准水印.json": "a09c287dbe5e9c3b5a76919c79dd056d75a1a9febbbb6fb30ac472edc737947a"
+  }
+}

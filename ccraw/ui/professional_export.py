@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMessageBox,
     QScrollArea,
+    QGroupBox,
 )
 
 from .. import export_presets as ep
@@ -31,7 +32,8 @@ from ..enhance_dialog import ExportDialog
 class ExportSettings(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        form = QFormLayout(self)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.color_space = QComboBox()
         self.color_space.addItems(list(ep.PROFILE_NAMES.values()))
         self.bit_depth = QComboBox()
@@ -74,20 +76,39 @@ class ExportSettings(QWidget):
         ]:
             self.metadata_policy.addItem(label, key)
         self.remove_location = QCheckBox('移除 GPS 与地点')
-        for label, widget in [
-            ('输出色域', self.color_space),
-            ('每通道位深', self.bit_depth),
-            ('渲染意图', self.intent),
-            ('输出长边', self.long_edge),
-            ('分辨率', self.resolution),
-            ('输出锐化', self.output_sharpening),
-            ('锐化强度', self.sharpening_amount),
-            ('文件名模板', self.naming),
-            ('元数据', self.metadata_policy),
-            ('', self.remove_location),
-        ]:
-            form.addRow(label, widget)
+        for title, rows in (
+            (
+                '颜色与精度',
+                (
+                    ('输出色域', self.color_space),
+                    ('每通道位深', self.bit_depth),
+                    ('渲染意图', self.intent),
+                ),
+            ),
+            ('尺寸与分辨率', (('输出长边', self.long_edge), ('分辨率', self.resolution))),
+            (
+                '细节与命名',
+                (
+                    ('输出锐化', self.output_sharpening),
+                    ('锐化强度', self.sharpening_amount),
+                    ('文件名模板', self.naming),
+                ),
+            ),
+            ('元数据策略', (('保留信息', self.metadata_policy), ('', self.remove_location))),
+        ):
+            group = QGroupBox(title)
+            group.setProperty('settings_group', True)
+            form = QFormLayout(group)
+            form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+            for label, widget in rows:
+                form.addRow(label, widget)
+            layout.addWidget(group)
+        self.output_sharpening.currentIndexChanged.connect(self._sharpening_changed)
+        self._sharpening_changed()
         self.set_format('jpeg')
+
+    def _sharpening_changed(self, *_):
+        self.sharpening_amount.setEnabled(self.output_sharpening.currentData() != 'none')
 
     def set_format(self, fmt):
         self.output_format = fmt
@@ -146,6 +167,8 @@ class ProfessionalExportDialog(ExportDialog):
         super().__init__(parent, source, enhance)
         self.setWindowTitle('专业导出与交换')
         self.format.addItem('PSD · 合并 RGB · 8/16-bit')
+        for index, title in enumerate(('JPEG', 'PNG', 'TIFF', 'DNG · 线性成片', 'PSD · 合并 RGB')):
+            self.format.setItemText(index, title)
         self.preset_path = (
             Path(preset_path)
             if preset_path

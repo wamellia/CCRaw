@@ -110,7 +110,9 @@ def raster_alpha(mask, shape, area=None):
     if area is None or area.shape == (h, w):
         alpha = cv2.resize(decode(mask['raster']), (w, h), interpolation=cv2.INTER_LINEAR)
         if feather > 0.2:
-            alpha = cv2.GaussianBlur(alpha, (0, 0), feather)
+            from .gpu_spatial import gaussian
+
+            alpha = gaussian(alpha, feather)
         return alpha
     from .engine import resize_region
 
@@ -118,5 +120,7 @@ def raster_alpha(mask, shape, area=None):
     outer = area.grow(int(np.ceil(feather * 4)) + 2 if feather > 0.2 else 0)
     alpha = resize_region(decode(mask['raster']), (w, h), outer)
     if feather > 0.2:
-        alpha = cv2.GaussianBlur(alpha, (0, 0), feather)
+        from .gpu_spatial import gaussian
+
+        alpha = gaussian(alpha, feather)
     return np.ascontiguousarray(alpha[outer.inner(area)])

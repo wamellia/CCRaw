@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from .. import selection
 from .. import cpu_ops
+from .. import gpu_spatial
 
 from .. import engine as pipeline
 
@@ -28,7 +29,7 @@ def dehaze_context(rgb, amount, basis=None):
     air = basis[:3]
     dark = basis[5:].reshape(tuple(basis[3:5].astype(int)))
     transmission = 1 - min(0.9, amount / 110) * dark
-    return (air, cv2.GaussianBlur(transmission, (0, 0), 7))
+    return (air, gpu_spatial.gaussian(transmission, 7))
 
 
 def dehaze(rgb, amount, context=None, area=None):
@@ -76,6 +77,11 @@ def spatial_details(
     a block of a frame (``area``) takes its dehaze statistics from ``dehaze_context``."""
     x = np.ascontiguousarray(rgb, dtype=np.float32)
     short = min((reference_shape or x.shape)[:2])
+    accelerated = gpu_spatial.chain(
+        x, a, detail_scale, reference_shape, area=area, cache=cache, basis_key=basis_key,
+    )
+    if accelerated is not None:
+        return accelerated
 
     def reuse(stage, key, fn):
         return fn() if cache is None else cache.get(stage, key, fn)
@@ -91,7 +97,7 @@ def spatial_details(
 
         def clarity_band():
             lum = cv2.cvtColor(x, cv2.COLOR_RGB2GRAY)
-            return lum - cv2.GaussianBlur(lum, (0, 0), max(1.0, short / 90))
+            return lum - gpu_spatial.gaussian(lum, max(1.0, short / 90))
 
         band = reuse('clarity-band', key, clarity_band)
         x = np.clip(x + (band * a.get('clarity', 0) / 65)[..., None], 0, 1)
@@ -101,8 +107,8 @@ def spatial_details(
         def texture_band():
             lum = cv2.cvtColor(x, cv2.COLOR_RGB2GRAY)
             radius = max(0.65, short / 800)
-            fine = cv2.GaussianBlur(lum, (0, 0), radius)
-            coarse = cv2.GaussianBlur(lum, (0, 0), radius * 3.5)
+            fine = gpu_spatial.gaussian(lum, radius)
+            coarse = gpu_spatial.gaussian(lum, radius * 3.5)
             return np.clip(fine - coarse, -0.08, 0.08)
 
         band = reuse('texture-band', key, texture_band)
@@ -111,7 +117,7 @@ def spatial_details(
     if a.get('sharpness', 0) > 0:
 
         def sharpen_band():
-            blur = cv2.GaussianBlur(x, (0, 0), max(0.45, detail_scale))
+            blur = gpu_spatial.gaussian(x, max(0.45, detail_scale))
             delta = x - blur
             delta *= np.minimum(1, np.abs(delta) / 0.008)
             return delta

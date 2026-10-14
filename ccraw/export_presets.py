@@ -139,7 +139,17 @@ def validate(options=None):
     if out['watermark']:
         from . import watermark
 
-        if set(out['watermark']) - set(watermark.defaults()):
+        legacy_fields = {
+            'preset',
+            'sides',
+            'size',
+            'fields',
+            'camera_logo',
+            'lens_logo',
+            'layout',
+            'smart_brand',
+        }
+        if set(out['watermark']) - set(watermark.defaults()) - legacy_fields:
             raise ValueError('unknown watermark field')
         if 'enabled' in out['watermark'] and not isinstance(out['watermark']['enabled'], bool):
             raise ValueError('watermark enabled must be a boolean')
@@ -377,18 +387,14 @@ def export_rgb(
         from . import watermark
 
         settings = opts['watermark']
-        original_rgb = rgb
-        rgb = watermark.apply(rgb, settings, metadata or {})
-        if opts['color_space'] != 'srgb':
-            from .imaging.colorspaces import convert
+        render_metadata = metadata or {}
+        if isinstance(provenance, dict) and provenance.get('source'):
+            from .photo_metadata import watermark_context
 
-            rgb = convert(rgb, 'sRGB', PROFILE_NAMES[opts['color_space']])
-            pad = max(1, round(min(original_rgb.shape[:2]) * settings['size'] / 100))
-            left = pad if 'left' in settings['sides'] else 0
-            top = pad if 'top' in settings['sides'] else 0
-            rgb[top : top + original_rgb.shape[0], left : left + original_rgb.shape[1]] = (
-                original_rgb
-            )
+            render_metadata = watermark_context(render_metadata, provenance['source'])
+        rgb = watermark.apply(
+            rgb, settings, render_metadata, color_space=PROFILE_NAMES[opts['color_space']]
+        )
         rgb = validate_rgb(rgb)
     if icc_profile is None:
         from .imaging.colorspaces import profile_bytes

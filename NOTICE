@@ -14,3 +14,13 @@ The image-generation templates and their preview images are derived from
 Photo-Butler, Copyright (c) 2024 Photo Butler, ISC License.
 The original permission text is included in
 ccraw/resources/Photo-Butler-LICENSE.txt.
+
+Watermark templates and adapted image processors are derived from
+leslievan/semi-utils, Apache License 2.0. Current processor source is pinned
+to b1cf1ce655e9452a78a88f465d4387f84cf6740e; legacy layout behavior is
+referenced from build1521. The adaptations replace application plumbing and
+image IO, and add float compositing, color management and constrained preview.
+The Apache license is included in ccraw/resources/Semi-Utils-LICENSE.txt.
+
+Bundled Roboto fonts retain Copyright 2011 Google Inc. All Rights Reserved,
+and the Apache License 2.0 terms embedded in their original font files.

@@ -15,6 +15,14 @@ class Backend:
     """
 
     def __init__(self, mode='auto'):
+        self.mode = 'cpu' if mode == 'cpu' or compute.requested_mode() == 'cpu' else 'auto'
+        self.accelerated = self.mode == 'auto' and compute.requested_mode() == 'auto'
+        self._adapter = None
+        self._available_providers = ()
+        self._spatial_ops = ()
+        self._spatial_device = ''
+        self._spatial_warning = ''
+        self._graph_provider = 'DmlExecutionProvider'
         self.xp = np
         self.use_dml = False
         self._sessions = {}
@@ -24,6 +32,10 @@ class Backend:
             if mode != 'cpu':
                 self.warning = 'CCRAW_COMPUTE=cpu：已按设置使用 CPU。'
             return
+        try:
+            self._adapter = compute.preferred_adapter()
+        except Exception:
+            pipeline.log.info('GPU adapter enumeration failed', exc_info=True)
         if compute.cupy_enabled():
             try:
                 import cupy as cp
@@ -44,26 +56,74 @@ class Backend:
             try:
                 import onnxruntime as ort
 
-                adapter = compute.preferred_adapter()
-                if (
-                    compute.requested_mode() in ('auto', 'dml')
-                    and adapter
-                    and ('DmlExecutionProvider' in ort.get_available_providers())
-                ):
+                adapter = self._adapter
+                self._available_providers = tuple(ort.get_available_providers())
+                plan = compute.provider_plan(self._available_providers, adapter)
+                if plan:
                     self.use_dml = True
-                    self.name = 'DirectML · ' + adapter[1]
+                    self._graph_provider = plan[0][1]
+                    self.name = self.gpu_label + ' · ' + (adapter[1] if adapter else plan[0][2])
             except Exception:
-                pipeline.log.info('DirectML detection failed', exc_info=True)
+                pipeline.log.info('ONNX GPU detection failed', exc_info=True)
         if self.xp is np and (not self.use_dml):
-            self.warning = '没有可用的 DirectML / CUDA，已使用 CPU。'
+            self.warning = 'ONNX 没有可用的 GPU 后端；像素操作使用 CPU，滤镜按成本选择设备。'
 
     @property
     def gpu_label(self):
-        return 'DirectML'
+        return 'CUDA' if self._graph_provider == 'CUDAExecutionProvider' else 'DirectML'
+
+    def device_summary(self):
+        """Cheap UI snapshot: detected hardware is separate from actual work."""
+        if self.mode == 'cpu':
+            return 'CPU · 手动模式'
+        name = self._adapter[1] if self._adapter else self._spatial_device
+        if not name:
+            return '自动 · CPU\n未检测到 GPU'
+        memory = self._adapter[2] if self._adapter else 0
+        capacity = f' · 专用显存约 {round(memory / 2**30)} GB' if memory >= 512 * 2**20 else ''
+        route = 'OpenCL + CPU' if self._spatial_ops else 'CPU'
+        if not self._spatial_ops and self.use_dml:
+            route = self.gpu_label + (' + CPU' if self._sessions else '（待验证）')
+        if not self._spatial_ops and self.xp is not np:
+            route = 'CUDA + CPU（实验）'
+        return name + capacity + '\n自动 · ' + route
+
+    def device_tooltip(self):
+        from .. import gpu_spatial
+
+        lines = [self.device_summary()]
+        if self.mode == 'cpu':
+            lines.append('手动 CPU 模式；滤镜和像素操作使用 CPU。')
+            return '\n'.join(lines)
+        if self._adapter:
+            driver = compute.adapter_driver(self._adapter)
+            if driver:
+                lines.append('驱动：' + driver)
+        lines.append('ONNX 后端：' + (', '.join(self._available_providers) or 'CPU'))
+        if self._spatial_ops:
+            lines.extend(
+                ('滤镜设备：' + self._spatial_device, 'GPU 步骤：' + '、'.join(self._spatial_ops))
+            )
+        else:
+            state = gpu_spatial.status()
+            lines.append(
+                '滤镜：'
+                + (
+                    state.get('device', '')
+                    if state.get('available')
+                    else '按图像大小与操作选择；尚未执行 GPU 滤镜'
+                )
+            )
+        lines.append('部分处理仍由 CPU 完成；小图与缓存命中保持 CPU 快速路径。')
+        if self._spatial_warning:
+            lines.append(self._spatial_warning)
+        if self.warning:
+            lines.append(self.warning)
+        return '\n'.join(lines)
 
     @property
     def gpu_pointwise(self):
-        """True while fused stages run through DirectML graphs."""
+        """True while pointwise stages can use DirectML or CUDA graphs."""
         return self.use_dml
 
     def _disable_gpu(self, warning):

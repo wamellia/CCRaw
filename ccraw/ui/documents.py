@@ -431,7 +431,11 @@ class DocumentsMixin:
                         cancelled=self.export_cancel.is_set,
                     )
             else:
-                result = watermark.apply(result, edits['watermark'], photo)
+                from ..photo_metadata import watermark_context
+
+                result = watermark.apply(
+                    result, edits['watermark'], watermark_context(photo, source_path)
+                )
                 engine.export_image(target, result, quality, photo=photo)
             return result.shape, backend, target, handoff
 
@@ -566,7 +570,7 @@ class DocumentsMixin:
     def closeEvent(self, event):
         if self.closing:
             if self.scheduler.active is None:
-                event.accept()
+                self._accept_drained_close(event)
             else:
                 event.ignore()
             return
@@ -590,4 +594,13 @@ class DocumentsMixin:
             self.statusBar().showMessage('正在完成当前预览任务后关闭…')
             event.ignore()
         else:
-            event.accept()
+            self._accept_drained_close(event)
+
+    def _accept_drained_close(self, event):
+        # Shutdown suppresses success/failure callbacks, including the callback
+        # that ends thumbnail activity. Clear those flags only after every
+        # scheduler job has drained; a running worker must still block changes.
+        self.work.pending_render = False
+        for activity in A:
+            self.work.end(activity)
+        event.accept()

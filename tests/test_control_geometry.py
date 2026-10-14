@@ -34,18 +34,18 @@ def test_tools_are_visible_and_clickable_at_minimum_window_size(window, app, mod
         apply_theme(app, mode)
         w.resize(1180, 780)
         app.processEvents()
-        assert len(w.tool_buttons) == w.tabs.count() == 10
+        assert len(w.tool_buttons) == w.editor_categories.count() == 6
         for index, button in enumerate(w.tool_buttons):
             assert button.isVisible() and button.text()
             assert button.width() >= button.minimumSizeHint().width()
             assert button.height() >= 36
             assert not button.icon().isNull()
             QTest.mouseClick(button, Qt.LeftButton)
-            assert w.tabs.currentIndex() == index
+            assert w.editor_categories.currentIndex() == index
             assert button.isChecked()
             assert sum(b.isChecked() for b in w.tool_buttons) == 1
-            w.tool_select.setCurrentIndex((index + 1) % 9)
-            assert w.tool_buttons[(index + 1) % 9].isChecked()
+            w.tool_select.setCurrentIndex((index + 1) % 6)
+            assert w.tool_buttons[(index + 1) % 6].isChecked()
         for button in (
             w.open_button,
             w.save_button,
@@ -71,7 +71,7 @@ def test_compact_inspector_keeps_tools_and_histogram_available(window, app):
     w.resize(1180, 780)
     app.processEvents()
     assert not w.histogram_panel.isVisible()
-    assert w.tabs.height() >= 235
+    assert w.editor_categories.height() >= 235
     QTest.mouseClick(w.histogram_button, Qt.LeftButton)
     assert w.histogram_panel.isVisible()
     QTest.mouseClick(w.histogram_button, Qt.LeftButton)

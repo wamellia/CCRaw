@@ -5,7 +5,18 @@ import math
 import re
 from pathlib import Path
 
-FIELDS = ('date', 'body', 'lens', 'aperture', 'shutter', 'iso', 'focal', 'brand', 'lens_brand')
+FIELDS = (
+    'date',
+    'body',
+    'lens',
+    'aperture',
+    'shutter',
+    'iso',
+    'focal',
+    'focal_equivalent',
+    'brand',
+    'lens_brand',
+)
 
 
 def clean(record):
@@ -32,6 +43,7 @@ def from_tags(tags):
     aperture, exposure, focal, iso = (
         numeric(k) for k in ('FNumber', 'ExposureTime', 'FocalLength', 'ISO')
     )
+    equivalent = numeric('FocalLengthIn35mmFormat') or numeric('FocalLengthIn35mmFilm')
     shutter = ''
     if exposure:
         reciprocal = 1 / exposure
@@ -82,6 +94,7 @@ def from_tags(tags):
             shutter=shutter,
             iso=f'ISO {iso:g}' if iso else '',
             focal=f'{focal:g} mm' if focal else '',
+            focal_equivalent=f'{equivalent:g} mm' if equivalent else '',
         )
     )
 
@@ -96,6 +109,12 @@ def description(photo, provenance=None):
         },
         ensure_ascii=True,
     )
+
+
+def watermark_context(photo, source_path):
+    """Add local naming context without passing an image path to a template."""
+    path = Path(source_path)
+    return {**photo, 'filename': path.name, 'folder': path.parent.name}
 
 
 def embedded(path):

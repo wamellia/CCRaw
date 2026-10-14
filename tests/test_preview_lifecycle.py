@@ -12,7 +12,9 @@ import numpy as np
 @pytest.mark.parametrize('name,tab', [('curve', 1), ('exposure_curve', 0), ('wheel', 6)])
 def test_tab_switch_closes_a_held_custom_gesture_and_restores_undo(window, name, tab):
     w = window
-    w.tabs.setCurrentIndex(tab)
+    w.select_editor_section(
+        {'curve': 'curves', 'exposure_curve': 'light', 'wheel': 'grading'}[name]
+    )
     wait_until(lambda: not w.jobs and not w.timer.isActive())
     before = copy.deepcopy(w.edits)
     widget = w.wheels['shadows'] if name == 'wheel' else getattr(w, name)

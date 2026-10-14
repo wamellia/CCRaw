@@ -129,7 +129,9 @@ class PhotoGallery(QListWidget):
         # Using viewport.width() here makes row height toggle scrollbar visibility.
         gutter = self.style().pixelMetric(QStyle.PixelMetric.PM_ScrollBarExtent, None, self)
         available = max(1, self.maximumViewportSize().width() - gutter - 8)
-        columns = max(2 if available >= 240 else 1, available // 220)
+        # A navigation sidebar can leave less than two useful card widths.
+        # Keep one readable card instead of squeezing panoramas into tiny strips.
+        columns = max(1, available // 220)
         width = available // columns
         height = max(
             140,

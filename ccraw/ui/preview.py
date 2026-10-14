@@ -78,12 +78,11 @@ class PreviewMixin:
     def preview_options(self):
         mask = (
             self.selected_mask()
-            if self.tabs.currentIndex() == 4 and self.overlay_check.isChecked()
+            if self.editor_tool_active('masks') and self.overlay_check.isChecked()
             else None
         )
         if (
-            self.tabs.currentIndex() == 9
-            and self.professional_editor.tabs.currentIndex() == 5
+            self.editor_tool_active('point_color')
             and self.professional_editor.range_preview.isChecked()
         ):
             index = self.professional_editor.sample_combo.currentIndex()
@@ -271,8 +270,7 @@ class PreviewMixin:
                         self.library_info.setText(
                             f'{self.info["format"]}  ·  {self.info["width"]} × {self.info["height"]}'
                         )
-                self.backend_label.setText(self.backend.name)
-                self.backend_label.setToolTip(self.backend.warning)
+                self.refresh_backend_status()
                 self.statusBar().showMessage('实时预览' if interactive else '预览已更新')
             if same_photo and interactive:
                 self.preview_quality.record(output.seconds)
@@ -290,6 +288,7 @@ class PreviewMixin:
 
         def failed(text):
             self.work.end(A.RENDER)
+            self.refresh_backend_status()
             if not cancel.is_set() and token == self.generation:
                 self.error('预览处理失败：\n' + text)
             elif not self.closing and (self.pending or cancel.is_set()):
@@ -331,7 +330,7 @@ class PreviewMixin:
         from ..imaging.professional import geometry_neutral, source_point, display_point
 
         pro = self.edits.get('professional', {})
-        if self.tabs.currentIndex() != 5 and not geometry_neutral(pro):
+        if not self.editor_tool_active('crop') and not geometry_neutral(pro):
             original_to_source, original_to_display = self.canvas.to_source, self.canvas.to_display
             shape = (size[1], size[0], 3)
             self.canvas.to_source = lambda p: source_point(
@@ -387,7 +386,7 @@ class PreviewMixin:
         else:
             self.update_overlay()
 
-        if self.tabs.currentIndex() == 2 and not self._preview_dragging:
+        if self.editor_tool_active('watermark') and not self._preview_dragging:
             self.watermark_editor.update_preview()
 
     def show_original(self, state):

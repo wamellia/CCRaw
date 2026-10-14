@@ -17,6 +17,7 @@ import numpy as np
 
 from .. import curves
 from .. import native_kernels
+from .. import gpu_spatial
 from . import colorspaces as cs
 from .professional import _lab, _rgb, apply_color
 
@@ -333,6 +334,12 @@ def spatial_details(
     ):
         return rgb
     short = min((reference_shape or rgb.shape)[:2])
+    accelerated = gpu_spatial.chain(
+        rgb, a, detail_scale, reference_shape, wide=True,
+        area=area, cache=cache, basis_key=basis_key,
+    )
+    if accelerated is not None:
+        return accelerated
     from ..engine import _key
 
     def reuse(stage, key, fn):
@@ -347,7 +354,7 @@ def spatial_details(
 
         def clarity_band():
             lum = out @ LUMA
-            return lum - cv2.GaussianBlur(lum, (0, 0), max(1.0, short / 90))
+            return lum - gpu_spatial.gaussian(lum, max(1.0, short / 90))
 
         band = reuse('clarity-band', key, clarity_band)
         out = out + (band * a['clarity'] / 65)[..., None]
@@ -357,8 +364,8 @@ def spatial_details(
         def texture_band():
             lum = out @ LUMA
             radius = max(0.65, short / 800)
-            return cv2.GaussianBlur(lum, (0, 0), radius) - cv2.GaussianBlur(
-                lum, (0, 0), radius * 3.5
+            return gpu_spatial.gaussian(lum, radius) - gpu_spatial.gaussian(
+                lum, radius * 3.5
             )
 
         band = reuse('texture-band', key, texture_band)
@@ -367,7 +374,7 @@ def spatial_details(
     if a.get('sharpness', 0):
 
         def sharpen_band():
-            blur = cv2.GaussianBlur(out, (0, 0), max(0.45, detail_scale))
+            blur = gpu_spatial.gaussian(out, max(0.45, detail_scale))
             delta = out - blur
             delta *= np.minimum(1, np.abs(delta) / 0.008)
             return delta

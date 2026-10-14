@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QSignalBlocker
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -11,6 +12,7 @@ from PySide6.QtWidgets import (
     QGridLayout,
     QLabel,
     QPushButton,
+    QMenu,
     QComboBox,
     QCheckBox,
     QLineEdit,
@@ -22,7 +24,6 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QListWidget,
     QListWidgetItem,
-    QSpinBox,
 )
 
 from .repository import Catalog
@@ -30,6 +31,7 @@ from .rules import describe_rules
 from .views import CompareDialog, SurveyDialog
 from .manager import CatalogWindow, open_catalog_for_editor, install_catalog  # noqa: F401
 from ..ui.layout import FlowLayout
+from . import controls
 
 
 def _button(text, callback):
@@ -49,7 +51,7 @@ class CatalogWindowMixin:
         self.catalog_dialogs = []
         navigation_panel = QWidget()
         navigation = FlowLayout(navigation_panel, margin=0)
-        self.navigation = QComboBox()
+        self.navigation = QComboBox(self)
         self.navigation.setProperty('user_content', True)
         self.navigation.setMinimumWidth(130)
         self.navigation.setSizeAdjustPolicy(
@@ -57,7 +59,8 @@ class CatalogWindowMixin:
         )
         self.navigation.setMinimumContentsLength(12)
         self.navigation.currentIndexChanged.connect(self.catalog_navigation_changed)
-        navigation.addWidget(self.navigation)
+        self.navigation.hide()
+        controls.install_navigation(self)
         self.sort_combo = QComboBox()
         for title, key in [
             ('导入时间', 'import'),
@@ -87,17 +90,29 @@ class CatalogWindowMixin:
         photo_layout.insertWidget(2, self.filter_summary)
         culling_panel = QWidget()
         culling = FlowLayout(culling_panel, margin=0)
-        culling.addWidget(QLabel('评级'))
-        self.rating_buttons = []
+        rating_menu = QMenu(self)
+        self.rating_actions = []
         for rating in range(6):
-            b = _button(str(rating), lambda _checked=False, value=rating: self.rate_selected(value))
-            b.setMaximumWidth(36)
-            culling.addWidget(b)
-            self.rating_buttons.append(b)
+            action = QAction('未评级' if rating == 0 else '★' * rating, self)
+            action.triggered.connect(lambda _checked=False, value=rating: self.rate_selected(value))
+            rating_menu.addAction(action)
+            self.rating_actions.append(action)
+        self.rating_menu_button = QPushButton('评级 0–5')
+        self.rating_menu_button.setMinimumHeight(32)
+        self.rating_menu_button.setToolTip('选中照片后评级；也可按键盘 0–5。')
+        self.rating_menu_button.setMenu(rating_menu)
+        culling.addWidget(self.rating_menu_button)
+        self.flag_actions = []
+        flag_menu = QMenu(self)
         for label, flag in [('保留 P', 'pick'), ('拒绝 X', 'reject'), ('清除 U', 'none')]:
-            culling.addWidget(
-                _button(label, lambda _checked=False, value=flag: self.flag_selected(value))
-            )
+            action = QAction(label, self)
+            action.triggered.connect(lambda _checked=False, value=flag: self.flag_selected(value))
+            flag_menu.addAction(action)
+            self.flag_actions.append(action)
+        self.flag_menu_button = QPushButton('保留 / 拒绝')
+        self.flag_menu_button.setMinimumHeight(32)
+        self.flag_menu_button.setMenu(flag_menu)
+        culling.addWidget(self.flag_menu_button)
         self.auto_advance = QCheckBox('自动前进')
         culling.addWidget(self.auto_advance)
         self.color_combo = QComboBox()
@@ -164,9 +179,15 @@ class CatalogWindowMixin:
             self.navigation.addItem('筛选 · ' + preset['name'], 'preset:' + preset['id'])
         self.navigation.setCurrentIndex(max(0, self.navigation.findData(selected)))
         blocker.unblock()
+        controls.refresh_navigation(self)
 
     def catalog_navigation_changed(self, *_):
         value = self.navigation.currentData() or 'all'
+        tree_blocker = QSignalBlocker(self.catalog_navigation_tree)
+        item = self.catalog_navigation_items.get(value)
+        if item:
+            self.catalog_navigation_tree.setCurrentItem(item)
+        tree_blocker.unblock()
         self.catalog_album = value[6:] if value.startswith('album:') else None
         self.catalog_preset = value[7:] if value.startswith('preset:') else None
         self.catalog_trash = value == 'trash'
@@ -218,6 +239,8 @@ class CatalogWindowMixin:
         )
 
     def catalog_apply_state(self, **changes):
+        if self.worker is not None:
+            return
         refs = self.selected_ids()
         if not refs:
             self.statusBar().showMessage('请选择照片。')
@@ -299,9 +322,13 @@ class CatalogWindowMixin:
         for title, mode in [('追加', 'append'), ('移除', 'remove'), ('替换', 'replace')]:
             self.keyword_mode.addItem(title, mode)
         keyword.addWidget(self.keyword_mode)
-        keyword.addWidget(_button('应用关键词', self.save_keywords))
+        self.keyword_save_button = _button('应用关键词', self.save_keywords)
+        keyword.addWidget(self.keyword_save_button)
         layout.addLayout(keyword)
-        layout.addWidget(_button('保存勾选元数据', self.save_metadata))
+        self.metadata_save_button = _button('保存勾选元数据', self.save_metadata)
+        layout.addWidget(self.metadata_save_button)
+        for check in self.metadata_checks.values():
+            check.toggled.connect(self.update_catalog_controls)
         self.metadata_exif = QPlainTextEdit()
         self.metadata_exif.setReadOnly(True)
         layout.addWidget(self.metadata_exif, 1)
@@ -338,6 +365,8 @@ class CatalogWindowMixin:
         )
 
     def save_metadata(self):
+        if self.worker is not None or not self.selected_ids():
+            return
         values = {
             key: field.text()
             for key, field in self.metadata_fields.items()
@@ -351,9 +380,13 @@ class CatalogWindowMixin:
             except ValueError:
                 self.statusBar().showMessage('人数需要整数或留空表示未知。')
                 return
+        if not values:
+            return
         self.catalog_action(lambda: self.catalog.edit_metadata(self.selected_ids(), values))
 
     def save_keywords(self):
+        if self.worker is not None or not self.selected_ids():
+            return
         values = [
             v.strip() for v in self.keyword_input.text().replace('，', ',').split(',') if v.strip()
         ]
@@ -364,75 +397,17 @@ class CatalogWindowMixin:
         )
 
     def _install_management(self):
-        panel = QWidget()
-        layout = QVBoxLayout(panel)
-        grid = FlowLayout(margin=0)
-        actions = [
-            ('新建相册', self.new_album),
-            ('新建智能相册', lambda: self.new_album('smart')),
-            ('新建相册文件夹', lambda: self.new_album('folder')),
-            ('添加到相册', self.add_to_album),
-            ('从当前相册移除', self.remove_from_album),
-            ('保存筛选预设', self.save_filter_preset),
-            ('Compare 对比', self.compare_selected),
-            ('Survey 候选', self.survey_selected),
-            ('建立堆叠', self.stack_selected),
-            ('堆叠操作', self.stack_dialog),
-            ('自动堆叠', self.auto_stack_dialog),
-            ('建立虚拟副本', self.copy_selected),
-            ('人物簇校正', self.cluster_dialog),
-            ('重关联原片', self.relink_selected),
-            ('检索重关联目录', self.search_relink_folder),
-            ('替换目录前缀', self.relink_prefix_dialog),
-            ('检查缺失原片', lambda: self.catalog_action(self.catalog.refresh_missing)),
-            ('代理操作', self.proxy_dialog),
-            ('恢复选中引用', lambda: self.catalog_apply_state(removed=False)),
-            ('数据库备份', self.backup_catalog),
-        ]
-        for i, (title, callback) in enumerate(actions):
-            grid.addWidget(_button(title, callback))
-        self.proxy_button = _button('创建 16 位离线代理', self.proxy_selected)
-        grid.addWidget(self.proxy_button)
-        self.trash_button = _button(
-            '移入工程回收站', lambda: self.catalog_apply_state(removed=True)
-        )
-        grid.addWidget(self.trash_button)
-        self.undo_catalog_button = _button(
-            '撤销管理动作', lambda: self.catalog_action(self.catalog.undo)
-        )
-        grid.addWidget(self.undo_catalog_button)
-        grid.addWidget(_button('重做管理动作', lambda: self.catalog_action(self.catalog.redo)))
-        grid.addWidget(_button('相册名称 / 父级 / 规则', self.edit_album_dialog))
-        grid.addWidget(_button('相册封面', self.album_cover))
-        grid.addWidget(_button('自定义相册顺序', self.album_order))
-        grid.addWidget(_button('备份并清空选中回收记录', self.purge_selected))
-        proxy_scale = QWidget()
-        proxy_scale_layout = QHBoxLayout(proxy_scale)
-        proxy_scale_layout.setContentsMargins(0, 0, 0, 0)
-        proxy_scale_layout.addWidget(QLabel('代理最长边'))
-        self.proxy_edge = QSpinBox()
-        self.proxy_edge.setRange(64, 8192)
-        self.proxy_edge.setValue(self.project.preferences().get('catalog.proxy_edge', 2560))
-        self.proxy_edge.setSuffix(' px')
-        self.proxy_edge.valueChanged.connect(
-            lambda value: self.project.preference('catalog.proxy_edge', value)
-        )
-        proxy_scale_layout.addWidget(self.proxy_edge)
-        grid.addWidget(proxy_scale)
-        layout.addLayout(grid)
-        explanation = QLabel('回收站只隐藏工程引用；不会删除原片。虚拟副本与配方快照是不同功能。')
-        explanation.setWordWrap(True)
-        layout.addWidget(explanation)
-        self.catalog_status = QLabel()
-        self.catalog_status.setWordWrap(True)
-        layout.addWidget(self.catalog_status)
-        layout.addStretch(1)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(panel)
-        self.tabs.addTab(scroll, '相册管理')
+        controls.install_management(self)
+
+    def update_catalog_controls(self):
+        controls.update_controls(self)
+
+    def catalog_operation_available(self, key):
+        return self.worker is None and controls.action_conditions(self).get(key, True)
 
     def catalog_action(self, operation):
+        if self.worker is not None:
+            return None
         try:
             result = operation()
             self.refresh_catalog_navigation()
@@ -454,6 +429,7 @@ class CatalogWindowMixin:
                         group['decision'] = decisions.get(self.catalog.suggestion_id(kind, group))
                 self.refresh_suggestions()
             self.catalog_status.setText('管理动作已保存；原片保留。')
+            self.statusBar().showMessage(self.catalog_status.text())
             return result
         except (ValueError, OSError) as error:
             self.catalog_status.setText(str(error))
@@ -461,6 +437,8 @@ class CatalogWindowMixin:
             return None
 
     def new_album(self, kind='album'):
+        if not self.catalog_operation_available('new_album'):
+            return
         name, ok = QInputDialog.getText(self, '新建相册', '名称')
         if not ok:
             return
@@ -482,6 +460,8 @@ class CatalogWindowMixin:
         )
 
     def add_to_album(self):
+        if not self.catalog_operation_available('add_album'):
+            return
         albums = [a for a in self.catalog.albums() if a['kind'] == 'album']
         if not albums:
             self.statusBar().showMessage('先建立普通相册。')
@@ -496,6 +476,8 @@ class CatalogWindowMixin:
             )
 
     def remove_from_album(self):
+        if not self.catalog_operation_available('remove_album'):
+            return
         if self.catalog_album:
             self.catalog_action(
                 lambda: self.catalog.remove_members(self.catalog_album, self.selected_ids())
@@ -632,6 +614,8 @@ class CatalogWindowMixin:
         dialog.exec()
 
     def edit_album_dialog(self):
+        if not self.catalog_operation_available('edit_album'):
+            return
         current = next((a for a in self.catalog.albums() if a['id'] == self.catalog_album), None)
         if not current:
             self.statusBar().showMessage('先在导航中选择相册。')
@@ -664,12 +648,16 @@ class CatalogWindowMixin:
             self.statusBar().showMessage('只有智能相册支持动态规则。')
 
     def album_cover(self):
+        if not self.catalog_operation_available('cover'):
+            return
         if self.catalog_album and len(self.selected_ids()) == 1:
             self.catalog_action(
                 lambda: self.catalog.update_album(self.catalog_album, cover=self.selected_ids()[0])
             )
 
     def album_order(self):
+        if not self.catalog_operation_available('order'):
+            return
         if not self.catalog_album:
             return
         with self.project.connect() as db:
@@ -708,6 +696,8 @@ class CatalogWindowMixin:
         dialog.exec()
 
     def purge_selected(self):
+        if not self.catalog_operation_available('purge'):
+            return
         refs = self.selected_ids()
         if not refs or any(self.catalog.state(ref)['removed_at'] is None for ref in refs):
             self.statusBar().showMessage('请在工程回收站选择需要清空的引用。')
@@ -719,6 +709,8 @@ class CatalogWindowMixin:
             self.catalog_action(lambda: self.catalog.purge_removed(refs, path))
 
     def save_filter_preset(self):
+        if not self.catalog_operation_available('save_filter'):
+            return
         name, ok = QInputDialog.getText(self, '筛选预设', '名称')
         if ok:
             self.catalog_action(
@@ -731,6 +723,8 @@ class CatalogWindowMixin:
             )
 
     def compare_selected(self):
+        if not self.catalog_operation_available('compare'):
+            return
         refs = self.selected_ids()
         if len(refs) != 2:
             self.statusBar().showMessage('Compare 请选择两张不同的照片。')
@@ -741,6 +735,8 @@ class CatalogWindowMixin:
         return dialog
 
     def survey_selected(self):
+        if not self.catalog_operation_available('survey'):
+            return
         refs = self.selected_ids()
         if not 2 <= len(refs) <= 30:
             self.statusBar().showMessage('Survey 请选择 2–30 张候选。')
@@ -751,9 +747,13 @@ class CatalogWindowMixin:
         return dialog
 
     def stack_selected(self):
+        if not self.catalog_operation_available('stack'):
+            return
         return self.catalog_action(lambda: self.catalog.create_stack(self.selected_ids()))
 
     def stack_dialog(self):
+        if not self.catalog_operation_available('stack_ops'):
+            return
         refs = set(self.selected_ids())
         stacks = [s for s in self.catalog.stacks() if refs.intersection(s['photos'])]
         if not stacks:
@@ -776,6 +776,8 @@ class CatalogWindowMixin:
                 )
 
     def auto_stack_dialog(self):
+        if not self.catalog_operation_available('auto_stack'):
+            return
         seconds, ok = QInputDialog.getDouble(
             self, '自动堆叠', '拍摄间隔秒数；未知拍摄时间保持独立', 2, 0, 3600, 2
         )
@@ -783,12 +785,16 @@ class CatalogWindowMixin:
             self.catalog_action(lambda: self.catalog.auto_stack(seconds=seconds))
 
     def copy_selected(self):
+        if not self.catalog_operation_available('copy'):
+            return
         if len(self.selected_ids()) != 1:
             self.statusBar().showMessage('请选择一张照片建立虚拟副本。')
             return
         self.catalog_action(lambda: self.catalog.create_virtual_copy(self.selected_ids()[0]))
 
     def cluster_dialog(self):
+        if not self.catalog_operation_available('people'):
+            return
         groups = (self.report or {}).get('people', [])
         if not groups:
             self.statusBar().showMessage('先扫描并生成匿名人物簇。')
@@ -832,11 +838,16 @@ class CatalogWindowMixin:
             ('标记已处理', 'resolved'),
         ]:
             action = menu.addAction(title)
+            action.setEnabled(
+                self.worker is None and bool(record.get('photos') or record.get('photo_id'))
+            )
             action.triggered.connect(
                 lambda _checked=False, d=decision: self.decide_group(kind, record, d)
             )
         if kind == 'events':
-            menu.addAction('按事件建立相册').triggered.connect(lambda: self.event_album(record))
+            action = menu.addAction('按事件建立相册')
+            action.setEnabled(self.worker is None and bool(record.get('photos')))
+            action.triggered.connect(lambda: self.event_album(record))
         if record.get('best_candidate'):
             menu.addAction('选中建议最佳候选').triggered.connect(
                 lambda: self.select_best_candidate(record)
@@ -857,11 +868,16 @@ class CatalogWindowMixin:
                 break
 
     def decide_group(self, kind, group, decision):
+        if self.worker is not None:
+            return
         self.catalog_action(lambda: self.catalog.decide_suggestion(kind, group, decision))
         group['decision'] = decision
         self.refresh_suggestions()
 
     def event_album(self, group):
+        if self.worker is not None or not group.get('photos'):
+            return
+
         def action():
             album = self.catalog.create_album(group.get('label', '事件'))
             for offset in range(0, len(group['photos']), 500):
@@ -870,6 +886,8 @@ class CatalogWindowMixin:
         self.catalog_action(action)
 
     def relink_selected(self):
+        if not self.catalog_operation_available('relink'):
+            return
         refs = self.selected_ids()
         if len(refs) != 1:
             self.statusBar().showMessage('请选择一张缺失照片。')
@@ -895,6 +913,8 @@ class CatalogWindowMixin:
                 )
 
     def search_relink_folder(self):
+        if not self.catalog_operation_available('search_relink'):
+            return
         refs = self.selected_ids()
         if len(refs) != 1:
             return
@@ -925,6 +945,8 @@ class CatalogWindowMixin:
             )
 
     def relink_prefix_dialog(self):
+        if not self.catalog_operation_available('prefix'):
+            return
         old, ok = QInputDialog.getText(self, '替换目录前缀', '旧目录')
         if not ok:
             return
@@ -933,6 +955,8 @@ class CatalogWindowMixin:
             self.catalog_action(lambda: self.catalog.relink_prefix(old, new))
 
     def proxy_selected(self):
+        if not self.catalog_operation_available('proxy'):
+            return
         refs = self.selected_ids()
         if not refs:
             return
@@ -954,24 +978,42 @@ class CatalogWindowMixin:
         self.start_work('创建 16 位离线代理', operation, lambda _: self.refresh_gallery())
 
     def proxy_dialog(self):
+        if not self.catalog_operation_available('proxy_ops'):
+            return
         refs = self.selected_ids()
         if len(refs) != 1:
             return
-        choice, ok = QInputDialog.getItem(
-            self,
-            '代理操作',
-            f'代理状态：{self.catalog.proxy_status(refs[0])}',
-            [
-                '打开离线编辑',
-                '明确输出低分辨率副本',
-                '迁移代理存储',
-                '清理无引用代理缓存',
-                '移除代理引用（可撤销）',
-            ],
-            0,
-            False,
-        )
-        if not ok:
+        ref = refs[0]
+        try:
+            proxy = self.catalog.proxy(ref)
+            status = self.catalog.proxy_status(ref)
+            proxy_file = bool(proxy and Path(proxy['path']).is_file())
+        except (ValueError, OSError):
+            status, proxy_file = 'missing', False
+        with self.project.connect() as db:
+            proxy_reference = bool(
+                db.execute('SELECT 1 FROM proxies WHERE photo_ref=?', (ref,)).fetchone()
+            )
+        choices = [
+            ('打开离线编辑', controls.editor_available(self, ref, allow_proxy=True)),
+            ('明确输出低分辨率副本', status in ('ready', 'offline')),
+            ('迁移代理存储', proxy_file),
+            ('清理无引用代理缓存', True),
+            ('移除代理引用（可撤销）', proxy_reference),
+        ]
+        dialog = QInputDialog(self)
+        dialog.setWindowTitle('代理操作')
+        dialog.setLabelText(f'代理状态：{status}')
+        dialog.setComboBoxItems([label for label, _available in choices])
+        dialog.setComboBoxEditable(False)
+        combo = dialog.findChild(QComboBox)
+        for index, (_label, available) in enumerate(choices):
+            combo.model().item(index).setEnabled(available)
+        combo.setCurrentIndex(next(i for i, (_label, available) in enumerate(choices) if available))
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        choice, available = choices[combo.currentIndex()]
+        if not available or self.worker is not None:
             return
         if choice == '打开离线编辑':
             self.open_editor(allow_proxy=True)
@@ -992,6 +1034,8 @@ class CatalogWindowMixin:
                 self.catalog_action(lambda: self.catalog.export_proxy(refs[0], path))
 
     def backup_catalog(self):
+        if not self.catalog_operation_available('backup'):
+            return
         path, _ = QFileDialog.getSaveFileName(self, 'SQLite 安全备份', '', 'SQLite (*.sqlite3)')
         if path:
             self.catalog_action(lambda: self.catalog.backup(path))

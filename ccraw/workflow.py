@@ -16,6 +16,12 @@ class WorkflowMixin:
         self.menu_album = file.addAction('保存选片集', self.save_album)
         self.menu_export = file.addAction('导出成片…', self.export)
         photo = menu.addMenu('照片')
+        adjustments = photo.addMenu('调整')
+        self.menu_reset = adjustments.addAction('重置所有调整', self.reset_edits)
+        self.reset_current_action = self.editor_reset_menu.addAction(
+            '重置当前分组', self.reset_editor_section
+        )
+        self.editor_reset_menu.addAction(self.menu_reset)
         photo.addAction('AI 超分辨率…', lambda: self.open_ai('super'))
         photo.addAction('AI 去杂色…', lambda: self.open_ai('denoise'))
         group = photo.addMenu('合成')
@@ -32,10 +38,10 @@ class WorkflowMixin:
         self.appearance_menu = AppearanceMenu(self)
         self.appearance_group = self.appearance_menu.group
         view.addMenu(self.appearance_menu)
-        for i in range(self.tabs.count()):
+        for i in range(self.editor_categories.count()):
             view.addAction(
-                self.tabs.tabText(i),
-                lambda checked=False, index=i: self.tabs.setCurrentIndex(index),
+                self.editor_categories.tabText(i),
+                lambda checked=False, index=i: self.editor_categories.setCurrentIndex(index),
             )
         helpmenu = menu.addMenu('帮助')
         helpmenu.addAction(
@@ -85,13 +91,18 @@ class WorkflowMixin:
         # The tab bar and scroll areas remain operable even without an image.
         active = self.source is not None and not self.work.busy(A.LOADING, A.AI)
         self.tabs.setEnabled(True)
-        for index in range(self.tabs.count()):
-            page = self.tabs.widget(index)
+        for index in range(self.editor_categories.count()):
+            page = self.editor_categories.widget(index)
             content = page.widget() if hasattr(page, 'widget') else page
             content.setEnabled(active)
         self.backend_combo.setEnabled(active)
+        self.refresh_editor_reset()
+        self.editor_reset_button.setEnabled(active and self.editor_groups.active is not None)
         self.refresh_history_buttons()
         self.menu_save.setEnabled(active)
+        self.menu_reset.setEnabled(active)
+        self.editor_reset_more_button.setEnabled(active)
+        self.reset_current_action.setEnabled(active and self.editor_groups.active is not None)
         self.menu_export.setEnabled(active and not self.work.busy(A.EXPORTING))
         self.menu_album.setEnabled(
             (bool(self.documents) or self.library_structure_dirty) and not self.work.busy(A.AI)

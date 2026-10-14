@@ -285,12 +285,12 @@ def test_compact_professional_page_has_real_editing_space(window, app):
     w.resize(1240, 670)
     app.processEvents()
     w.tabs.setCurrentIndex(9)
-    assert w.tool_select.isVisible() and w.tool_select.height() >= 30
-    assert not any(button.isVisible() for button in w.tool_buttons)
-    assert w.tabs.height() >= 240
-    assert w.professional_editor.tabs.height() >= 175
-    w.tool_select.setCurrentIndex(5)
-    assert w.tabs.currentIndex() == 5
+    assert all(button.isVisible() and button.height() >= 36 for button in w.tool_buttons)
+    assert w.editor_categories.height() >= 175
+    assert not w.professional_editor.tabs.isVisible()
+    w.tool_select.setCurrentIndex(3)
+    w.select_editor_section('crop')
+    assert w.editor_categories.currentIndex() == 3 and w.canvas.tool == 'crop'
     w.resize(1240, 900)
     app.processEvents()
     assert all(button.isVisible() for button in w.tool_buttons)

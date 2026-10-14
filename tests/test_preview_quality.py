@@ -13,7 +13,9 @@ from ccraw import engine
 @pytest.mark.parametrize('name,tab', [('curve', 1), ('exposure_curve', 0), ('wheel', 6)])
 def test_curve_and_wheel_are_live_gestures_with_one_undo(window, name, tab):
     w = window
-    w.tabs.setCurrentIndex(tab)
+    w.select_editor_section(
+        {'curve': 'curves', 'exposure_curve': 'light', 'wheel': 'grading'}[name]
+    )
     wait_until(lambda: not w.timer.isActive() and not w.jobs)
     before = copy.deepcopy(w.edits)
     widget = w.wheels['midtones'] if name == 'wheel' else getattr(w, name)
@@ -190,15 +192,18 @@ def test_watermark_image_generation_is_coalesced_in_the_worker(window, monkeypat
 
     monkeypatch.setattr(watermark_dialog, 'qimage', tracked)
     editor.enabled.setChecked(True)
+    graph = editor.pipeline_editor
+    graph.select_path((0,))
+    radius = graph.properties.field_widgets['border_radius']
     for value in range(8, 36):
-        editor.size.setValue(value)
+        radius.set_value(value, emit=True)
     wait_until(
         lambda: not w.jobs and not editor._preview_timer.isActive() and not editor._preview_running
     )
     assert threads and len(threads) <= 3
     assert all(t != threading.get_ident() for t in threads)
     assert editor.preview.pixmap() is not None
-    assert w.edits['watermark']['size'] == 35
+    assert float(w.edits['watermark']['pipeline'][0]['border_radius']) == 35
 
 
 def test_keyboard_curve_repeats_are_one_live_transaction(window):

@@ -34,12 +34,14 @@ from PySide6.QtWidgets import (
 
 from .. import resources, nl_edit, model, image_generation
 from ..ui.theme import AppearanceButton
+from ..ui.layout import FlowLayout
 from . import analysis, editing, search
 from .models import LocalModels, install_models
 from .runtime import run_turn
 from .gallery import PhotoGallery, DETAIL_ROLE, thumbnail
 from .launcher import Launcher as Launcher
 from ..catalog.window import CatalogWindowMixin
+from ..catalog import controls as catalog_controls
 
 ACTIVE = weakref.WeakValueDictionary()
 
@@ -90,6 +92,7 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         self.worker = None
         self.client = None
         self.models = None
+        self._models_refresh_pending = False
         self.editors = []
         self.preview_dialog = None
         self.closing = False
@@ -104,35 +107,37 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         self.setWindowTitle(f'{project.manifest["name"]} · Photo Agent · CCRaw')
         self.setWindowIcon(QIcon(str(resources.asset_path('ccraw.ico'))))
         self.resize(1440, 940)
-        self.setMinimumSize(1180, 780)
+        self.setMinimumSize(980, 680)
         root = QWidget()
         layout = QVBoxLayout(root)
         layout.setContentsMargins(16, 12, 16, 12)
         top = QHBoxLayout()
+        self.agent_top_layout = top
         self.title = QLabel(project.manifest['name'])
         self.title.setProperty('user_content', True)
         self.title.setStyleSheet('font-size: 20px; font-weight: 600;')
         top.addWidget(self.title, 1)
-        for text, callback in [
-            ('导入照片', self.import_files),
-            ('导入文件夹', self.import_folder),
-            ('重新扫描', self.scan),
-            ('本地模型', self.setup_models),
-            ('模型设置', self.settings),
-        ]:
-            control = button(text, callback)
-            top.addWidget(control)
-            self.busy_controls.append(control)
+        self.import_menu = QMenu(self)
+        self.import_menu.addAction('导入照片').triggered.connect(self.import_files)
+        self.import_menu.addAction('导入文件夹').triggered.connect(self.import_folder)
+        self.import_button = QPushButton('导入')
+        self.import_button.setMinimumHeight(36)
+        self.import_button.setMenu(self.import_menu)
+        top.addWidget(self.import_button)
+        self.scan_button = button('重新扫描', self.scan)
+        top.addWidget(self.scan_button)
+        self.busy_controls.extend((self.import_button, self.scan_button))
         self.appearance_button = AppearanceButton(self)
         top.addWidget(self.appearance_button)
         self.chat_toggle = button('收起对话', self.toggle_chat)
         top.addWidget(self.chat_toggle)
         layout.addLayout(top)
         splitter = QSplitter()
+        self.workspace_splitter = splitter
         splitter.setChildrenCollapsible(False)
         splitter.setHandleWidth(6)
         left = QWidget()
-        left.setMinimumWidth(520)
+        left.setMinimumWidth(420)
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 8, 0)
         self.photo_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -147,9 +152,10 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         self.search_input.setPlaceholderText('找图：去年夏天海边的日落，画面中有两个人')
         self.search_input.returnPressed.connect(self.local_search)
         finder.addWidget(self.search_input, 1)
-        find = button('找图', self.local_search, primary=True)
-        finder.addWidget(find)
-        self.busy_controls.append(find)
+        self.find_button = button('找图', self.local_search, primary=True)
+        finder.addWidget(self.find_button)
+        self.busy_controls.append(self.find_button)
+        self.search_input.textChanged.connect(self.update_agent_controls)
         finder.addWidget(button('全部', self.show_all))
         photo_layout.addLayout(finder)
         self.gallery = PhotoGallery()
@@ -159,17 +165,24 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         self.gallery.customContextMenuRequested.connect(self.photo_menu)
         photo_layout.addWidget(self.gallery, 1)
         pages = QHBoxLayout()
-        pages.addWidget(button('上一页', lambda: self.page(-1)))
+        self.previous_page_button = button('上一页', lambda: self.page(-1))
+        pages.addWidget(self.previous_page_button)
         self.count_label = QLabel()
         pages.addWidget(self.count_label, 1)
-        pages.addWidget(button('下一页', lambda: self.page(1)))
+        self.next_page_button = button('下一页', lambda: self.page(1))
+        pages.addWidget(self.next_page_button)
         photo_layout.addLayout(pages)
-        photo_actions = QHBoxLayout()
+        photo_actions = FlowLayout(margin=0)
+        self.photo_action_layout = photo_actions
+        self.selection_label = QLabel()
+        photo_actions.addWidget(self.selection_label)
         self.editor_button = button('照片编辑', self.open_editor)
         photo_actions.addWidget(self.editor_button)
         annotate = button('标注人数 / 标签', self.annotation)
+        self.annotation_button = annotate
         photo_actions.addWidget(annotate)
         recommend = button('推荐修图', self.recommend)
+        self.recommend_button = recommend
         photo_actions.addWidget(recommend)
         self.busy_controls.extend((annotate, recommend, self.editor_button))
         photo_layout.addLayout(photo_actions)
@@ -177,28 +190,33 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         self.tabs = QTabWidget()
         self.suggestion_list = QListWidget()
         self.suggestion_list.itemClicked.connect(self.select_group)
+        self.suggestion_list.currentItemChanged.connect(self.update_agent_controls)
         self.suggestion_offset = 0
         suggestion_panel = QWidget()
         suggestion_layout = QVBoxLayout(suggestion_panel)
         suggestion_layout.addWidget(self.suggestion_list)
         suggestion_actions = QHBoxLayout()
-        suggestion_actions.addWidget(button('上一组建议', lambda: self.page_suggestions(-1)))
+        self.previous_suggestion_button = button('上一组建议', lambda: self.page_suggestions(-1))
+        suggestion_actions.addWidget(self.previous_suggestion_button)
         self.suggestion_count = QLabel()
         suggestion_actions.addWidget(self.suggestion_count, 1)
-        suggestion_actions.addWidget(button('下一组建议', lambda: self.page_suggestions(1)))
+        self.next_suggestion_button = button('下一组建议', lambda: self.page_suggestions(1))
+        suggestion_actions.addWidget(self.next_suggestion_button)
         suggestion_layout.addLayout(suggestion_actions)
         decisions = QHBoxLayout()
+        self.suggestion_decision_buttons = []
         for label, decision in [
             ('保留建议', 'keep'),
             ('忽略建议', 'ignore'),
             ('标记已处理', 'resolved'),
         ]:
-            decisions.addWidget(
-                button(
-                    label,
-                    lambda _checked=False, value=decision: self.current_suggestion_decision(value),
-                )
+            decision_button = button(
+                label,
+                lambda _checked=False, value=decision: self.current_suggestion_decision(value),
             )
+            decision_button.setToolTip('选择一条整理建议后记录决定。')
+            self.suggestion_decision_buttons.append(decision_button)
+            decisions.addWidget(decision_button)
         suggestion_layout.addLayout(decisions)
         self.tabs.addTab(suggestion_panel, '整理建议')
         proposal_panel = QWidget()
@@ -231,7 +249,7 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         splitter.addWidget(left)
         right = QWidget()
         self.chat_panel = right
-        right.setMinimumWidth(340)
+        right.setMinimumWidth(260)
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(8, 0, 0, 0)
         self.provider_label = QLabel()
@@ -246,6 +264,7 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         right_layout.addWidget(self.input)
         send_row = QHBoxLayout()
         self.send_button = button('发送', self.send, primary=True)
+        self.input.textChanged.connect(self.update_agent_controls)
         self.cancel_button = button('取消', self.cancel_work)
         self.cancel_button.setEnabled(False)
         send_row.addWidget(self.send_button, 1)
@@ -275,6 +294,29 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
     def selected_ids(self):
         return [item.data(Qt.ItemDataRole.UserRole) for item in self.gallery.selectedItems()]
 
+    def update_agent_controls(self, *_):
+        if not hasattr(self, 'send_button'):
+            return
+        idle = self.worker is None
+        self.send_button.setEnabled(idle and bool(self.input.toPlainText().strip()))
+        self.find_button.setEnabled(
+            idle and bool(self.search_input.text().strip()) and self.project.summary()['photos'] > 0
+        )
+        for action in self.import_menu.actions():
+            action.setEnabled(idle)
+        total = getattr(self, '_gallery_total', 0)
+        self.previous_page_button.setEnabled(idle and self.offset > 0)
+        self.next_page_button.setEnabled(idle and self.offset + 200 < total)
+        suggestions = getattr(self, '_suggestion_total', 0)
+        self.previous_suggestion_button.setEnabled(idle and self.suggestion_offset > 0)
+        self.next_suggestion_button.setEnabled(idle and self.suggestion_offset + 200 < suggestions)
+        item = self.suggestion_list.currentItem()
+        data = item.data(Qt.ItemDataRole.UserRole + 1) if item else None
+        actionable = bool(data and (data[1].get('photos') or data[1].get('photo_id')))
+        for control in self.suggestion_decision_buttons:
+            control.setEnabled(idle and actionable)
+        self.update_proposal_controls()
+
     def start_work(self, name, operation, done=None):
         if self.worker is not None:
             self.statusBar().showMessage('请等待当前任务完成或取消。')
@@ -285,6 +327,7 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         self.apply_button.setEnabled(False)
         for control in self.busy_controls:
             control.setEnabled(False)
+        self.update_catalog_controls()
         self.cancel_button.setEnabled(True)
         self.progress_bar.setRange(0, 0)
         self.progress_bar.show()
@@ -344,11 +387,15 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
             self.statusBar().showMessage('正在取消当前任务…')
 
     def import_files(self):
+        if self.worker is not None:
+            return
         paths, _ = QFileDialog.getOpenFileNames(self, '导入照片', '', '照片 (*)')
         if paths:
             self.import_photos(paths)
 
     def import_folder(self):
+        if self.worker is not None:
+            return
         path = QFileDialog.getExistingDirectory(self, '导入文件夹')
         if path:
             self.import_photos(Path(path))
@@ -371,9 +418,15 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
 
         self.start_work('导入并扫描照片', operation, self.scanned)
 
-    def scan_operation(self, cancel, emit):
-        if self.models is None:
+    def ensure_local_models(self):
+        """Refresh installed models at a new operation boundary, never mid-task."""
+        if self.models is None or self._models_refresh_pending:
             self.models = LocalModels()
+            self._models_refresh_pending = False
+        return self.models
+
+    def scan_operation(self, cancel, emit):
+        self.ensure_local_models()
         result = analysis.index_project(
             self.project,
             cancel,
@@ -410,6 +463,8 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         return result, report
 
     def scan(self):
+        if not self.catalog_operation_available('scan'):
+            return
         self.start_work('扫描照片', self.scan_operation, self.scanned)
 
     def scanned(self, result):
@@ -463,8 +518,7 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         selected = tuple(self.selected_ids())
 
         def operation(cancel, emit):
-            if self.models is None:
-                self.models = LocalModels()
+            self.ensure_local_models()
             return asyncio.run(
                 run_turn(
                     self.project,
@@ -480,7 +534,11 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
             self.input.clear()
 
     def local_search(self):
-        if self.worker:
+        if (
+            self.worker is not None
+            or not self.search_input.text().strip()
+            or self.project.summary()['photos'] == 0
+        ):
             return
         query = search.parse_query(
             self.search_input.text(), timezone=self.project.manifest['timezone']
@@ -498,8 +556,7 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
             }
 
         def operation(cancel, emit):
-            if self.models is None:
-                self.models = LocalModels()
+            self.ensure_local_models()
             return search.search(self.project, query, models=self.models)
 
         def found(result):
@@ -516,6 +573,8 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         self.refresh_gallery()
 
     def page(self, step):
+        if self.worker is not None:
+            return
         count = self.catalog_query(limit=1, offset=0)['total']
         self.offset = max(0, min(max(0, (count - 1) // 200 * 200), self.offset + step * 200))
         self.refresh_gallery()
@@ -592,11 +651,13 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
                 self.gallery.setCurrentItem(item)
         summary = self.project.summary()
         count = page['total'] if page else summary['photos']
+        self._gallery_total = count
         self.count_label.setText(
             f'{count} 张 · 已索引 {summary["indexed"]} · {self.offset + 1 if count else 0}–{min(count, self.offset + 200)}'
         )
         blocker.unblock()
         self.refresh_proposals()
+        self.update_catalog_controls()
         if hasattr(self, 'metadata_fields'):
             self.refresh_metadata()
 
@@ -612,6 +673,9 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
     def refresh_suggestions(self):
         self.suggestion_list.clear()
         if self.report is None:
+            self._suggestion_total = 0
+            self.suggestion_count.setText('0 条 · 0–0')
+            self.update_agent_controls()
             return
         labels = {
             'duplicates': '完全重复',
@@ -625,6 +689,7 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
             for kind, label in labels.items()
             for group in self.report.get(kind, [])
         ]
+        self._suggestion_total = len(groups)
         self.suggestion_offset = min(self.suggestion_offset, max(0, (len(groups) - 1) // 200 * 200))
         self.suggestion_count.setText(
             f'{len(groups)} 条 · {self.suggestion_offset + 1 if groups else 0}–{min(len(groups), self.suggestion_offset + 200)}'
@@ -655,12 +720,17 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         self.suggestion_list.setToolTip(
             f'整理建议分析 {coverage.get("analyzed", 0)} / {coverage.get("total", 0)} 张；建议需要人工判断。'
         )
+        self.update_agent_controls()
 
     def page_suggestions(self, step):
+        if self.worker is not None:
+            return
         self.suggestion_offset = max(0, self.suggestion_offset + step * 200)
         self.refresh_suggestions()
 
     def current_suggestion_decision(self, decision):
+        if self.worker is not None:
+            return
         item = self.suggestion_list.currentItem()
         if item:
             data = item.data(Qt.ItemDataRole.UserRole + 1)
@@ -686,7 +756,6 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
             self.proposal_list.addItem(item)
         if self.proposal_list.count():
             self.proposal_list.setCurrentRow(0)
-        self.apply_button.setEnabled(self.worker is None and self.proposal_list.count() > 0)
         self.update_proposal_controls()
         self.clear_proposals_button.setEnabled(
             self.worker is None and self.proposal_list.count() > 0
@@ -695,17 +764,47 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
     def update_proposal_controls(self, *_):
         if not hasattr(self, 'preview_button'):
             return
-        current = self.proposal_list.currentItem()
+        proposal = self.current_valid_proposal()
+        self.apply_button.setEnabled(self.worker is None and proposal is not None)
         self.preview_button.setEnabled(
-            self.worker is None
-            and current is not None
-            and current.data(Qt.ItemDataRole.UserRole)['kind'] == 'local'
+            self.worker is None and proposal is not None and proposal['kind'] == 'local'
         )
+        self.clear_proposals_button.setEnabled(
+            self.worker is None and self.proposal_list.count() > 0
+        )
+
+    def current_valid_proposal(self):
+        item = self.proposal_list.currentItem()
+        if item is None:
+            return None
+        try:
+            proposal = self.project.get_proposal(item.data(Qt.ItemDataRole.UserRole)['id'])
+            if proposal['status'] != 'pending' or proposal['photo_id'] not in self.selected_ids():
+                return None
+            photo = self.project.photo(proposal['photo_id'])
+            if not catalog_controls.original_available(photo, scanned=True):
+                return None
+            if proposal['payload'].get('source_sha256') != photo['sha']:
+                return None
+            return proposal if proposal['kind'] in ('local', 'external') else None
+        except (ValueError, KeyError, TypeError, OSError):
+            return None
 
     def photo_menu(self, position):
         if self.gallery.itemAt(position) is None:
             return
+        item = self.gallery.itemAt(position)
+        if not item.isSelected():
+            self.gallery.clearSelection()
+            self.gallery.setCurrentItem(item)
+            item.setSelected(True)
+        self.update_catalog_controls()
         menu = QMenu(self)
+        for key in ('compare', 'survey', 'copy'):
+            menu.addAction(self.catalog_actions[key])
+        menu.addMenu(self.catalog_menus['selection'])
+        menu.addMenu(self.catalog_menus['files'])
+        menu.addSeparator()
         copy_ids = menu.addAction('复制选中照片 ID')
         copy_ids.setEnabled(bool(self.selected_ids()))
         copy_ids.triggered.connect(
@@ -726,14 +825,27 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
             item = QListWidgetItem(Path(derivative['path']).name)
             item.setData(Qt.ItemDataRole.UserRole, derivative['path'])
             self.derivative_list.addItem(item)
-        self.trace.setPlainText(
-            '\n'.join(
-                f'{e["seq"]} · {e["kind"]} · {json.dumps(e["payload"], ensure_ascii=False)[:1200]}'
-                for e in self.project.events()
+        rows = []
+        last_group = None
+        for event in self.project.events():
+            group = event['kind'].split('.')[0]
+            if group != last_group:
+                rows.append('<h3>' + html.escape(group) + '</h3>')
+                last_group = group
+            payload = html.escape(json.dumps(event['payload'], ensure_ascii=False, indent=2)[:1200])
+            rows.append(
+                '<p><b>'
+                + html.escape(f'{event["seq"]} · {event["kind"]}')
+                + '</b></p>'
+                + '<pre style="white-space:pre-wrap">'
+                + payload
+                + '</pre>'
             )
-        )
+        self.trace.setHtml(''.join(rows) or '<p>执行后的记录会显示在这里。</p>')
 
     def recommend(self):
+        if not self.catalog_operation_available('recommend'):
+            return
         ids = self.selected_ids()
         if not 1 <= len(ids) <= 30:
             self.statusBar().showMessage('请选择 1–30 张照片。')
@@ -745,10 +857,9 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         )
 
     def preview_proposal(self):
-        item = self.proposal_list.currentItem()
-        if self.worker is not None or item is None:
+        proposal = self.current_valid_proposal()
+        if self.worker is not None or proposal is None:
             return
-        proposal = item.data(Qt.ItemDataRole.UserRole)
         if proposal['kind'] != 'local':
             self.statusBar().showMessage('外部方案需要服务商生成结果，不能本地预览。')
             return
@@ -818,6 +929,8 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         return dialog
 
     def annotation(self):
+        if self.worker is not None:
+            return
         if len(self.selected_ids()) != 1:
             self.statusBar().showMessage('请选择一张照片。')
             return
@@ -832,6 +945,8 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
             )
 
     def save_annotation(self, count, tags):
+        if self.worker is not None:
+            return
         ids = self.selected_ids()
         if len(ids) != 1:
             raise ValueError('请选择一张照片。')
@@ -846,10 +961,9 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         )
 
     def apply_proposal(self):
-        item = self.proposal_list.currentItem()
-        if self.worker or item is None:
+        proposal = self.current_valid_proposal()
+        if self.worker or proposal is None:
             return
-        proposal = item.data(Qt.ItemDataRole.UserRole)
         payload = proposal['payload']
         if proposal['kind'] == 'local':
             details = (
@@ -892,6 +1006,15 @@ class AgentWindow(CatalogWindowMixin, QMainWindow):
         self.open_editor(paths=[item.data(Qt.ItemDataRole.UserRole)])
 
     def open_editor(self, *, paths=None, allow_proxy=False):
+        if self.worker is not None:
+            return
+        if paths is None and (
+            len(self.selected_ids()) != 1
+            or not catalog_controls.editor_available(
+                self, self.selected_ids()[0], allow_proxy=allow_proxy
+            )
+        ):
+            return
         from ..app import MainWindow
 
         project = self.project

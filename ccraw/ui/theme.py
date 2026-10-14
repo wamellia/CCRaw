@@ -4,7 +4,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from PySide6.QtCore import QSettings
 from PySide6.QtGui import QActionGroup, QColor, QFontDatabase, QPalette
-from PySide6.QtWidgets import QApplication, QMenu, QPushButton
+from PySide6.QtWidgets import QApplication, QMenu, QPushButton, QTreeWidget
+from .disclosure import (
+    disclosure_color,
+    disclosure_path,
+    install_disclosure_filter,
+    set_disclosure,
+    style_hierarchy,
+    style_menu,
+)
 
 
 @dataclass(frozen=True)
@@ -133,6 +141,10 @@ def stylesheet(t):
     suffix = '-dark' if t == DARK else ''
     chevron = (assets / f'chevron{suffix}.svg').as_posix()
     up = (assets / f'chevron-up{suffix}.svg').as_posix()
+    disclosure_down = disclosure_path('down', t).as_posix()
+    disclosure_right = disclosure_path('right', t).as_posix()
+    disabled_down = disclosure_path('down', t, True).as_posix()
+    disabled_right = disclosure_path('right', t, True).as_posix()
     return f'''
 QWidget {{ background: {t.background}; color: {t.text}; font-size: 13px; }}
 QMainWindow, QDialog {{ background: {t.background}; }}
@@ -152,7 +164,14 @@ QPushButton:disabled, QToolButton:disabled {{ color: {t.disabled}; background: {
 QPushButton#primary {{ background: {t.accent}; border-color: {t.accent}; color: white; padding: 6px 16px; font-weight: 600; }}
 QPushButton#primary:hover {{ background: {primary_hover}; border-color: {primary_hover}; }}
 QPushButton#primary:pressed {{ background: {primary_pressed}; }}
-QPushButton#primary:disabled {{ background: {t.selection}; color: {t.disabled}; }}
+QPushButton#primary:disabled {{ background: {t.recessed}; color: {t.disabled}; border-color: {t.track}; }}
+QPushButton::menu-indicator {{ image: url("{disclosure_down}"); width: 16px; height: 16px; subcontrol-origin: padding; subcontrol-position: center right; right: 5px; }}
+QPushButton::menu-indicator:disabled {{ image: url("{disabled_down}"); }}
+QPushButton[hasMenu="true"] {{ padding-right: 26px; }}
+QToolButton::menu-indicator, QToolButton::menu-arrow {{ image: url("{disclosure_down}"); width: 16px; height: 16px; }}
+QToolButton::menu-indicator:disabled, QToolButton::menu-arrow:disabled {{ image: url("{disabled_down}"); }}
+QToolButton#disclosureButton {{ padding: 6px; min-width: 24px; }}
+QToolButton#disclosureButton::menu-indicator {{ image: none; width: 0; height: 0; }}
 QToolButton#toolNavigation {{ padding: 5px 6px; text-align: left; }}
 QTabWidget::pane {{ border: 0; }}
 QTabBar {{ background: {t.recessed}; border-radius: 8px; }}
@@ -173,7 +192,8 @@ QDoubleSpinBox:focus, QSpinBox:focus, QLineEdit:focus, QComboBox:focus, QTextEdi
 QDoubleSpinBox:disabled, QSpinBox:disabled, QComboBox:disabled {{ color: {t.disabled}; }}
 QComboBox {{ padding-right: 30px; }}
 QComboBox::drop-down {{ border-left: 1px solid {t.border}; width: 26px; }}
-QComboBox::down-arrow {{ image: url("{chevron}"); width: 16px; height: 16px; }}
+QComboBox::down-arrow {{ image: url("{disclosure_down}"); width: 16px; height: 16px; }}
+QComboBox::down-arrow:disabled {{ image: url("{disabled_down}"); }}
 QDoubleSpinBox::up-button, QDoubleSpinBox::down-button, QSpinBox::up-button, QSpinBox::down-button {{ width: 18px; border-left: 1px solid {t.border}; background: {t.recessed}; }}
 QDoubleSpinBox::up-arrow, QSpinBox::up-arrow {{ image: url("{up}"); width: 12px; height: 12px; }}
 QDoubleSpinBox::down-arrow, QSpinBox::down-arrow {{ image: url("{chevron}"); width: 12px; height: 12px; }}
@@ -193,6 +213,22 @@ QScrollBar::handle {{ background: {t.track}; border-radius: 3px; min-height: 24p
 QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 QListWidget {{ background: transparent; border: 0; outline: 0; }}
+QTreeWidget {{ background: {t.panel}; border: 1px solid {t.border}; border-radius: 6px; outline: 0; padding: 4px; }}
+QTreeWidget::item {{ min-height: 28px; padding: 4px 6px; border-radius: 4px; }}
+QTreeWidget::item:hover {{ background: {t.hover}; }}
+QTreeWidget::item:selected {{ background: {t.selection}; color: {selected_text}; }}
+QTreeWidget::item:disabled {{ color: {t.disabled}; }}
+QTreeWidget::branch {{ background: transparent; }}
+QTreeWidget::branch:has-children:closed {{ image: url("{disclosure_right}"); }}
+QTreeWidget::branch:has-children:open {{ image: url("{disclosure_down}"); }}
+QTreeWidget::branch:has-children:closed:disabled {{ image: url("{disabled_right}"); }}
+QTreeWidget::branch:has-children:open:disabled {{ image: url("{disabled_down}"); }}
+QGroupBox[settings_group="true"] {{ background: {t.panel}; border: 1px solid {t.border}; border-radius: 6px; margin-top: 12px; padding: 12px 10px 8px; }}
+QGroupBox[settings_group="true"]::title {{ subcontrol-origin: margin; subcontrol-position: top left; left: 10px; padding: 0 5px; color: {t.text}; font-weight: 600; }}
+QLabel#settings-page-title {{ font-size: 18px; font-weight: 600; padding: 0 0 8px; }}
+QToolButton#editorSectionHeader {{ background: {t.recessed}; color: {disclosure_color(t)}; border: 0; border-bottom: 1px solid {t.border}; border-radius: 0; padding: 7px 6px; text-align: left; font-weight: 600; }}
+QToolButton#editorSectionHeader:hover {{ background: {t.hover}; }}
+QToolButton#editorSectionHeader:checked {{ background: {t.selection}; color: {t.text}; }}
 QListWidget::item {{ border: 2px solid transparent; border-radius: 8px; padding: 6px; }}
 QListWidget::item:hover {{ background: {t.hover}; }}
 QListWidget::item:selected {{ background: {t.selection}; color: {selected_text}; }}
@@ -205,9 +241,6 @@ QMenuBar {{ background: {t.panel}; padding: 0 8px; }}
 QMenuBar::item {{ background: transparent; padding: 4px 10px; }}
 QMenuBar::item:selected {{ background: {t.hover}; border-radius: 6px; }}
 QMenu {{ background: {t.elevated}; border: 1px solid {t.border}; border-radius: 8px; padding: 4px; }}
-QMenu::item {{ padding: 6px 24px; border-radius: 6px; }}
-QMenu::item:selected {{ background: {t.selection}; color: {selected_text}; }}
-QMenu::separator {{ height: 1px; background: {t.border}; margin: 4px 8px; }}
 QToolTip {{ background: {t.elevated}; color: {t.text}; border: 1px solid {t.border}; padding: 8px; }}
 QProgressBar {{ background: {t.recessed}; border: 0; border-radius: 2px; text-align: center; }}
 QProgressBar::chunk {{ background: {t.accent}; border-radius: 2px; }}
@@ -235,6 +268,7 @@ def apply_theme(app, mode='light'):
     """Palette propagation keeps child dialogs and painters synchronized."""
     if app is None:
         return LIGHT
+    install_disclosure_filter(app)
     resolved = system_appearance() if mode == 'system' else mode
     app.setProperty('appearanceMode', mode)
     app.setProperty('appearanceResolved', resolved)
@@ -280,6 +314,12 @@ def apply_theme(app, mode='light'):
         for widget in app.allWidgets():
             if isinstance(widget, (AppearanceMenu, AppearanceButton)):
                 widget.sync(mode)
+            if isinstance(widget, QTreeWidget):
+                style_hierarchy(widget, t)
+            if isinstance(widget, QMenu):
+                style_menu(widget, app)
+            if widget.property('disclosureDirection'):
+                set_disclosure(widget, widget.property('disclosureDirection') == 'down', t)
         return t
     app.setPalette(palette)
     app.setStyleSheet(style)
@@ -289,6 +329,12 @@ def apply_theme(app, mode='light'):
     for widget in app.allWidgets():
         if isinstance(widget, (AppearanceMenu, AppearanceButton)):
             widget.sync(mode)
+        if isinstance(widget, QTreeWidget):
+            style_hierarchy(widget, t)
+        if isinstance(widget, QMenu):
+            style_menu(widget, app)
+        if widget.property('disclosureDirection'):
+            set_disclosure(widget, widget.property('disclosureDirection') == 'down', t)
         if widget.property('symbol'):
             from .icons import set_icon
 
@@ -327,6 +373,7 @@ class AppearanceButton(QPushButton):
         self.setToolTip('切换浅色或深色外观')
         self.appearance_menu = AppearanceMenu(self)
         self.setMenu(self.appearance_menu)
+        self.setProperty('hasMenu', True)
         from .icons import set_icon
 
         set_icon(self, 'light')
