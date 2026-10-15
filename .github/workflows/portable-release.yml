@@ -14,6 +14,9 @@ on:
       recipe_sha256:
         description: SHA-256 of the original ZIP recipe
         required: true
+      recipe_gzip_base64:
+        description: Optional compact ZIP recipe, gzip and base64 encoded
+        required: false
 permissions:
   contents: write
 concurrency:
@@ -43,13 +46,30 @@ jobs:
           if (-not $release.draft -or $release.tag_name -ne "v$env:RELEASE_VERSION") { throw 'Expected matching draft release.' }
           $assets = Invoke-RestMethod "$api/releases/$env:RELEASE_ID/assets?per_page=100" -Headers $headers
           $installer = $assets | Where-Object name -eq "CCRaw-$env:RELEASE_VERSION-Setup.exe"
-          $recipe = $assets | Where-Object name -eq "CCRaw-$env:RELEASE_VERSION-zip-recipe.json"
-          if (-not $installer -or $installer.state -ne 'uploaded' -or -not $recipe -or $recipe.state -ne 'uploaded') { throw 'Verified inputs are missing.' }
+          if (-not $installer -or $installer.state -ne 'uploaded') { throw 'Verified installer is missing.' }
           $work = Join-Path $env:RUNNER_TEMP "ccraw-$env:RELEASE_VERSION"
           New-Item -ItemType Directory -Path $work | Out-Null
           $headers.Accept = 'application/octet-stream'
           Invoke-WebRequest "$api/releases/assets/$($installer.id)" -Headers $headers -OutFile (Join-Path $work 'setup.exe') -TimeoutSec 600
-          Invoke-WebRequest "$api/releases/assets/$($recipe.id)" -Headers $headers -OutFile (Join-Path $work 'recipe.json') -TimeoutSec 120
+          $inline = (Get-Content -LiteralPath $env:GITHUB_EVENT_PATH -Raw | ConvertFrom-Json).inputs.recipe_gzip_base64
+          if ($inline) {
+            $memory = [System.IO.MemoryStream]::new([Convert]::FromBase64String($inline))
+            $gzip = [System.IO.Compression.GZipStream]::new($memory, [System.IO.Compression.CompressionMode]::Decompress)
+            $file = [System.IO.File]::Create((Join-Path $work 'recipe.json'))
+            try {
+              $buffer = [byte[]]::new(65536)
+              $total = 0
+              while (($count = $gzip.Read($buffer, 0, $buffer.Length)) -gt 0) {
+                $total += $count
+                if ($total -gt 4MB) { throw 'ZIP metadata exceeds its size limit.' }
+                $file.Write($buffer, 0, $count)
+              }
+            } finally { $file.Dispose(); $gzip.Dispose(); $memory.Dispose() }
+          } else {
+            $recipe = $assets | Where-Object name -eq "CCRaw-$env:RELEASE_VERSION-zip-recipe.json"
+            if (-not $recipe -or $recipe.state -ne 'uploaded') { throw 'ZIP recipe is missing.' }
+            Invoke-WebRequest "$api/releases/assets/$($recipe.id)" -Headers $headers -OutFile (Join-Path $work 'recipe.json') -TimeoutSec 120
+          }
           if ((Get-FileHash (Join-Path $work 'setup.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:INSTALLER_SHA256) { throw 'Installer checksum mismatch.' }
           if ((Get-FileHash (Join-Path $work 'recipe.json') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:RECIPE_SHA256) { throw 'Recipe checksum mismatch.' }
           $manifest = Get-Content (Join-Path $work 'recipe.json') -Raw | ConvertFrom-Json

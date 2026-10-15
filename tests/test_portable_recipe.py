@@ -7,7 +7,8 @@ import pytest
 from tools.packaging.portable_recipe import create, rebuild
 
 
-def test_rebuilt_archive_is_byte_identical_despite_different_file_timestamps(tmp_path):
+@pytest.mark.parametrize('compact', [False, True])
+def test_rebuilt_archive_is_byte_identical_despite_different_file_timestamps(tmp_path, compact):
     root = tmp_path / 'original'
     root.mkdir()
     data = {'CCRaw.exe': b'executable' * 1000, '数据.json': b'payload', 'empty': b''}
@@ -18,6 +19,10 @@ def test_rebuilt_archive_is_byte_identical_despite_different_file_timestamps(tmp
         for name in data:
             file.write(root / name, 'CCRaw-Windows/' + name)
     recipe = create(archive)
+    if compact:
+        for entry in recipe['entries']:
+            entry.pop('CRC')
+            entry.pop('file_size')
     extracted = tmp_path / 'installer'
     extracted.mkdir()
     for name, value in data.items():

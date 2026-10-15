@@ -83,13 +83,13 @@ def rebuild(root, recipe, output):
                 ):
                     raise ValueError('Invalid portable resource path.')
                 path = root.joinpath(*name.parts[1:]).resolve()
-                if (
-                    not path.is_relative_to(root)
-                    or not path.is_file()
-                    or path.stat().st_size != entry['file_size']
-                ):
+                if not path.is_relative_to(root) or not path.is_file():
                     raise ValueError('Installer resource missing or changed: ' + str(name))
+                size = path.stat().st_size
+                if 'file_size' in entry and size != entry['file_size']:
+                    raise ValueError('Installer resource size differs: ' + str(name))
                 info = zipfile.ZipInfo(entry['filename'], tuple(entry['date_time']))
+                info.file_size = size
                 for key in (
                     'compress_type',
                     'create_system',
@@ -101,13 +101,14 @@ def rebuild(root, recipe, output):
                     'external_attr',
                     'file_size',
                 ):
-                    setattr(info, key, entry[key])
+                    if key in entry:
+                        setattr(info, key, entry[key])
                 info.extra = base64.b64decode(entry['extra'], validate=True)
                 info.comment = base64.b64decode(entry['comment'], validate=True)
                 info._compresslevel = recipe['compression_level']
                 with path.open('rb') as source, target.open(info, 'w') as destination:
                     shutil.copyfileobj(source, destination, 1024 * 1024)
-                if info.CRC != entry['CRC']:
+                if 'CRC' in entry and info.CRC != entry['CRC']:
                     raise ValueError('Installer resource CRC differs: ' + str(name))
         if temporary.stat().st_size != recipe['bytes'] or digest(temporary) != recipe['sha256']:
             raise ValueError('Rebuilt portable ZIP does not match the original archive.')
