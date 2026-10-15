@@ -1,0 +1,96 @@
+name: Assemble verified portable release
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: Draft release ID
+        required: true
+      version:
+        description: Release version without v
+        required: true
+      installer_sha256:
+        description: SHA-256 of the tested installer
+        required: true
+      recipe_sha256:
+        description: SHA-256 of the original ZIP recipe
+        required: true
+permissions:
+  contents: write
+concurrency:
+  group: portable-release-${{ inputs.version }}
+  cancel-in-progress: false
+jobs:
+  assemble:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_ID: ${{ inputs.release_id }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      INSTALLER_SHA256: ${{ inputs.installer_sha256 }}
+      RECIPE_SHA256: ${{ inputs.recipe_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download and verify tested inputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:RELEASE_ID -notmatch '^\d+$' -or $env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid release input.' }
+          if ($env:INSTALLER_SHA256 -notmatch '^[a-f0-9]{64}$' -or $env:RECIPE_SHA256 -notmatch '^[a-f0-9]{64}$') { throw 'Invalid checksum input.' }
+          $api = "https://api.github.com/repos/$env:GITHUB_REPOSITORY"
+          $headers = @{ Authorization="Bearer $env:GH_TOKEN"; Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28' }
+          $release = Invoke-RestMethod "$api/releases/$env:RELEASE_ID" -Headers $headers
+          if (-not $release.draft -or $release.tag_name -ne "v$env:RELEASE_VERSION") { throw 'Expected matching draft release.' }
+          $assets = Invoke-RestMethod "$api/releases/$env:RELEASE_ID/assets?per_page=100" -Headers $headers
+          $installer = $assets | Where-Object name -eq "CCRaw-$env:RELEASE_VERSION-Setup.exe"
+          $recipe = $assets | Where-Object name -eq "CCRaw-$env:RELEASE_VERSION-zip-recipe.json"
+          if (-not $installer -or $installer.state -ne 'uploaded' -or -not $recipe -or $recipe.state -ne 'uploaded') { throw 'Verified inputs are missing.' }
+          $work = Join-Path $env:RUNNER_TEMP "ccraw-$env:RELEASE_VERSION"
+          New-Item -ItemType Directory -Path $work | Out-Null
+          $headers.Accept = 'application/octet-stream'
+          Invoke-WebRequest "$api/releases/assets/$($installer.id)" -Headers $headers -OutFile (Join-Path $work 'setup.exe') -TimeoutSec 600
+          Invoke-WebRequest "$api/releases/assets/$($recipe.id)" -Headers $headers -OutFile (Join-Path $work 'recipe.json') -TimeoutSec 120
+          if ((Get-FileHash (Join-Path $work 'setup.exe') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:INSTALLER_SHA256) { throw 'Installer checksum mismatch.' }
+          if ((Get-FileHash (Join-Path $work 'recipe.json') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $env:RECIPE_SHA256) { throw 'Recipe checksum mismatch.' }
+          $manifest = Get-Content (Join-Path $work 'recipe.json') -Raw | ConvertFrom-Json
+          if ($manifest.python -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid Python version in recipe.' }
+          "PACKAGE_WORK=$work" >> $env:GITHUB_ENV
+          "PACK_PYTHON_VERSION=$($manifest.python)" >> $env:GITHUB_ENV
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PACK_PYTHON_VERSION }}
+      - name: Extract portable files without installation
+        shell: pwsh
+        run: |
+          $target = Join-Path $env:PACKAGE_WORK 'application'
+          $arguments = @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-','/NOICONS','/PORTABLE=1',('/DIR="' + $target + '"'))
+          $process = Start-Process -FilePath (Join-Path $env:PACKAGE_WORK 'setup.exe') -ArgumentList $arguments -WindowStyle Hidden -PassThru -Wait
+          if ($process.ExitCode -ne 0) { throw 'Installer extraction failed.' }
+      - name: Reproduce and verify original ZIP
+        shell: pwsh
+        run: |
+          python tools/packaging/portable_recipe.py rebuild "$env:PACKAGE_WORK/application" "$env:PACKAGE_WORK/recipe.json" "$env:PACKAGE_WORK/CCRaw-$env:RELEASE_VERSION-Windows.zip"
+          if ($LASTEXITCODE -ne 0) { throw 'Portable ZIP reproduction failed.' }
+      - name: Upload byte-identical portable archive
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $api = "https://api.github.com/repos/$env:GITHUB_REPOSITORY"
+          $headers = @{ Authorization="Bearer $env:GH_TOKEN"; Accept='application/vnd.github+json'; 'X-GitHub-Api-Version'='2022-11-28' }
+          $release = Invoke-RestMethod "$api/releases/$env:RELEASE_ID" -Headers $headers
+          if (-not $release.draft -or $release.tag_name -ne "v$env:RELEASE_VERSION") { throw 'Expected matching draft release.' }
+          $manifest = Get-Content "$env:PACKAGE_WORK/recipe.json" -Raw | ConvertFrom-Json
+          $name = "CCRaw-$env:RELEASE_VERSION-Windows.zip"
+          $existing = (Invoke-RestMethod "$api/releases/$env:RELEASE_ID/assets?per_page=100" -Headers $headers) | Where-Object name -eq $name
+          if ($existing) {
+            if ($existing.state -eq 'uploaded') {
+              if ($existing.digest -eq "sha256:$($manifest.sha256)" -and $existing.size -eq $manifest.bytes) { exit 0 }
+              throw 'Refusing to replace an uploaded archive with different content.'
+            }
+            Invoke-RestMethod "$api/releases/assets/$($existing.id)" -Method Delete -Headers $headers
+          }
+          $uri = "https://uploads.github.com/repos/$env:GITHUB_REPOSITORY/releases/$env:RELEASE_ID/assets?name=$name"
+          $asset = Invoke-RestMethod $uri -Method Post -Headers $headers -ContentType 'application/octet-stream' -InFile "$env:PACKAGE_WORK/$name" -TimeoutSec 900
+          if ($asset.digest -ne "sha256:$($manifest.sha256)" -or $asset.size -ne $manifest.bytes) { throw 'Uploaded archive checksum mismatch.' }
+          "Portable ZIP verified and uploaded: $name" >> $env:GITHUB_STEP_SUMMARY
+          "SHA-256: $($manifest.sha256)" >> $env:GITHUB_STEP_SUMMARY
