@@ -1,0 +1,366 @@
+{
+  "upstream": "https://github.com/leslievan/semi-utils",
+  "commit": "b1cf1ce655e9452a78a88f465d4387f84cf6740e",
+  "fonts": {
+    "AlibabaPuHuiTi-2-45-Light.otf": {
+      "sha256": "fe99706c0a253227da782f3db3c7126617a1e21420c00a6a6931fe50597dd046",
+      "records": [
+        {
+          "id": 0,
+          "platform": 1,
+          "lang": 0,
+          "text": "Copyright ?2020-2021 Alibaba (China) Co., Ltd. All rights reserved."
+        },
+        {
+          "id": 7,
+          "platform": 1,
+          "lang": 0,
+          "text": "Alibaba is a trademark of Alibaba Group Holding Limited."
+        },
+        {
+          "id": 8,
+          "platform": 1,
+          "lang": 0,
+          "text": "Alibaba Design;Hanyi Fonts"
+        },
+        {
+          "id": 0,
+          "platform": 1,
+          "lang": 33,
+          "text": "(c) 2020-2021 °¢Àï°Í°Í£¨ÖÐ¹ú£©ÓÐÏÞ¹«Ë¾£¬°æÈ¨ËùÓÐ"
+        },
+        {
+          "id": 7,
+          "platform": 1,
+          "lang": 33,
+          "text": "°¢Àï°Í°Í¡¢AlibabaÊÇ°¢Àï°Í°Í¼¯ÍÅÔÚÖÐ¹ú¼°ÆäËû¹ú¼Ò»òµØÇøµÄÉÌ±ê»ò×¢²áÉÌ±ê"
+        },
+        {
+          "id": 8,
+          "platform": 1,
+          "lang": 33,
+          "text": "Alibaba Design£»ººÒÇ×Ö¿â"
+        },
+        {
+          "id": 0,
+          "platform": 3,
+          "lang": 1033,
+          "text": "Copyright © 2020-2021 Alibaba (China) Co., Ltd. All rights reserved."
+        },
+        {
+          "id": 7,
+          "platform": 3,
+          "lang": 1033,
+          "text": "Alibaba is a trademark of Alibaba Group Holding Limited."
+        },
+        {
+          "id": 8,
+          "platform": 3,
+          "lang": 1033,
+          "text": "Alibaba Design;Hanyi Fonts"
+        },
+        {
+          "id": 0,
+          "platform": 3,
+          "lang": 2052,
+          "text": "(c) 2020-2021 阿里巴巴（中国）有限公司，版权所有"
+        },
+        {
+          "id": 7,
+          "platform": 3,
+          "lang": 2052,
+          "text": "阿里巴巴、Alibaba是阿里巴巴集团在中国及其他国家或地区的商标或注册商标"
+        },
+        {
+          "id": 8,
+          "platform": 3,
+          "lang": 2052,
+          "text": "Alibaba Design；汉仪字库"
+        }
+      ]
+    },
+    "AlibabaPuHuiTi-2-85-Bold.otf": {
+      "sha256": "9b88dead745fcf1d229d1472728d8a53c0cabee43e1907d6e2ae26774b95c633",
+      "records": [
+        {
+          "id": 0,
+          "platform": 1,
+          "lang": 0,
+          "text": "Copyright ?2020-2021 Alibaba (China) Co., Ltd. All rights reserved."
+        },
+        {
+          "id": 7,
+          "platform": 1,
+          "lang": 0,
+          "text": "Alibaba is a trademark of Alibaba Group Holding Limited."
+        },
+        {
+          "id": 8,
+          "platform": 1,
+          "lang": 0,
+          "text": "Alibaba Design;Hanyi Fonts"
+        },
+        {
+          "id": 0,
+          "platform": 1,
+          "lang": 33,
+          "text": "(c) 2020-2021 °¢Àï°Í°Í£¨ÖÐ¹ú£©ÓÐÏÞ¹«Ë¾£¬°æÈ¨ËùÓÐ"
+        },
+        {
+          "id": 7,
+          "platform": 1,
+          "lang": 33,
+          "text": "°¢Àï°Í°Í¡¢AlibabaÊÇ°¢Àï°Í°Í¼¯ÍÅÔÚÖÐ¹ú¼°ÆäËû¹ú¼Ò»òµØÇøµÄÉÌ±ê»ò×¢²áÉÌ±ê"
+        },
+        {
+          "id": 8,
+          "platform": 1,
+          "lang": 33,
+          "text": "Alibaba Design£»ººÒÇ×Ö¿â"
+        },
+        {
+          "id": 0,
+          "platform": 3,
+          "lang": 1033,
+          "text": "Copyright © 2020-2021 Alibaba (China) Co., Ltd. All rights reserved."
+        },
+        {
+          "id": 7,
+          "platform": 3,
+          "lang": 1033,
+          "text": "Alibaba is a trademark of Alibaba Group Holding Limited."
+        },
+        {
+          "id": 8,
+          "platform": 3,
+          "lang": 1033,
+          "text": "Alibaba Design;Hanyi Fonts"
+        },
+        {
+          "id": 0,
+          "platform": 3,
+          "lang": 2052,
+          "text": "(c) 2020-2021 阿里巴巴（中国）有限公司，版权所有"
+        },
+        {
+          "id": 7,
+          "platform": 3,
+          "lang": 2052,
+          "text": "阿里巴巴、Alibaba是阿里巴巴集团在中国及其他国家或地区的商标或注册商标"
+        },
+        {
+          "id": 8,
+          "platform": 3,
+          "lang": 2052,
+          "text": "Alibaba Design；汉仪字库"
+        }
+      ]
+    },
+    "Roboto-Bold.ttf": {
+      "source": "config/fonts/Roboto-Bold.ttf",
+      "sha256": "ec685a46105296fe46c8744da4a11cf8118ba6c11271941766f7a546df6aa7c7",
+      "copyright": "Copyright 2011 Google Inc. All Rights Reserved.",
+      "license": "Apache-2.0",
+      "modified": false
+    },
+    "Roboto-Light.ttf": {
+      "source": "config/fonts/Roboto-Light.ttf",
+      "sha256": "c576c50642271bcdbfffed04f92dc8d6a981daf300914d0a20c8a5a5a57015c7",
+      "copyright": "Copyright 2011 Google Inc. All Rights Reserved.",
+      "license": "Apache-2.0",
+      "modified": false
+    },
+    "Roboto-Medium.ttf": {
+      "source": "config/fonts/Roboto-Medium.ttf",
+      "sha256": "9d0d55a303bfd13b79a87721f65185e93f235e2d77fe398b2dca67ac519915f5",
+      "copyright": "Copyright 2011 Google Inc. All Rights Reserved.",
+      "license": "Apache-2.0",
+      "modified": false
+    },
+    "Roboto-Regular.ttf": {
+      "source": "config/fonts/Roboto-Regular.ttf",
+      "sha256": "4e147ab64b9fdf6d89d01f6b8c3ca0b3cddc59d608a8e2218f9a2504b5c98e14",
+      "copyright": "Copyright 2011 Google Inc. All Rights Reserved.",
+      "license": "Apache-2.0",
+      "modified": false
+    }
+  },
+  "font_notice": "Embedded font name table has copyright, trademark and manufacturer records, but no license name IDs13/14. Alibaba fonts retain their separate rights; upstream repository Apache-2.0 is not a grant for the fonts.",
+  "font_official_source": "https://www.alibabafonts.com/",
+  "logos": {
+    "watermark-brand-canon.png": {
+      "source": "config/logos/canon.png",
+      "source_sha256": "43dd5f6bd7acddc4d484e51d0ed335c63afa678cac72d1cc3443a2b7205cd86c",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-nikon.png": {
+      "source": "config/logos/nikon.png",
+      "source_sha256": "16a13a565d630ff28a3c7903f34abe3c7199bd0364ab69a9155e6d168d52706f",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-sony.png": {
+      "source": "config/logos/sony.png",
+      "source_sha256": "38fd29b5efa86cb71820d754aac121da48a63733dd822520d945a2c45aa18643",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-fujifilm.png": {
+      "source": "config/logos/fujifilm.png",
+      "source_sha256": "ac79d0e224ac88a6d8d6c49cf3296b9423a7630549911d20a100e3113d6c1618",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-panasonic.png": {
+      "source": "config/logos/panasonic.png",
+      "source_sha256": "4b044cfd8d0c6b458770df453431aaa99ad7c572845173e039dc736fc18fa10a",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-ricoh.png": {
+      "source": "config/logos/ricoh.png",
+      "source_sha256": "8f20bf3ceedac3d4e01f735d054f2a97a1a3a607e0df6c046b808d2830313723",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-pentax.png": {
+      "source": "config/logos/pentax.png",
+      "source_sha256": "6dc8d3c211680948b03175a72144b0e9171cca6c26d272596f5fbcb0a921c04c",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-olympus.png": {
+      "source": "config/logos/olympus_blue_gold.png",
+      "source_sha256": "c1c983257b1bf671d0aeb6added72476206e446d8981c80075ba2ed798f4d6d5",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-leica.png": {
+      "source": "config/logos/leica_logo.png",
+      "source_sha256": "b487ec61f1ac8b29170c601130a1d615d5e3d10c7cfbad7a5e716d02a2324082",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-hasselblad.png": {
+      "source": "config/logos/hasselblad.png",
+      "source_sha256": "3a3b0662d20538cae7d41d3f237e8b2b9289e6a4346453b9dc93a7cdbcc86287",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-dji.png": {
+      "source": "config/logos/DJI.jpg",
+      "source_sha256": "e9190a733bf42ad6fd1449771308b5309e8a81eea7330cf897e5adb8c4fdce85",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-apple.png": {
+      "source": "config/logos/apple.png",
+      "source_sha256": "6d79f9ad5e269860acc5689f517ab7cd0afc904823278f597e36f96857abab54",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-huawei.png": {
+      "source": "config/logos/xmage.png",
+      "source_sha256": "8632838d87c2023a3d75df10ec983732f1b09e683c92375b30a1c766558dc52f",
+      "transform": "Pillow convertRGBA, encodePNG; no crop or repaint"
+    },
+    "watermark-brand-default.png": {
+      "source": "config/logos/default.png",
+      "source_sha256": "cb3d86476e22db486484299d3b7f89435dcb109ea0e59b0ebb8278bad93c8816",
+      "bundled_sha256": "6161e2783824d056e33bab4cd3f0740bce4a932320c1b4ae8fccb6623825cbd8",
+      "transform": "Pillow convertRGBA, encodePNG; original margins retained"
+    },
+    "watermark-brand-leica_logo.png": {
+      "source": "config/logos/leica_logo.png",
+      "source_sha256": "b487ec61f1ac8b29170c601130a1d615d5e3d10c7cfbad7a5e716d02a2324082",
+      "bundled_sha256": "c81294c27533de091c3e9377999dbe8eff9a8037efedf964c7399a4c832f108c",
+      "transform": "Pillow convertRGBA, encodePNG; original margins retained"
+    },
+    "watermark-brand-olympus_blue_gold.png": {
+      "source": "config/logos/olympus_blue_gold.png",
+      "source_sha256": "c1c983257b1bf671d0aeb6added72476206e446d8981c80075ba2ed798f4d6d5",
+      "bundled_sha256": "eb63b163200d5338d085c0fa6cd9f32ac740deed444e2f11a1385f6e68f09558",
+      "transform": "Pillow convertRGBA, encodePNG; original margins retained"
+    },
+    "watermark-brand-olympus_white_gold.png": {
+      "source": "config/logos/olympus_white_gold.png",
+      "source_sha256": "17c3a37b3f8ab4593173adaacf4bbb9e7259ec63544d4f1a3abceb30fa94f3aa",
+      "bundled_sha256": "3c674169433395a490f1b33ca372a1fe7af3d3dd2c407a71788bae94fc927330",
+      "transform": "Pillow convertRGBA, encodePNG; original margins retained"
+    },
+    "watermark-brand-panasonic2.png": {
+      "source": "config/logos/panasonic2.png",
+      "source_sha256": "c19a41c5bb932a40d44e278141edb61a94e249d0ff4448ae1048f77f70171ff5",
+      "bundled_sha256": "b1f64a8000ad12baaafc8498108b764c8cf45166393d185beb8457963c39dfd0",
+      "transform": "Pillow convertRGBA, encodePNG; original margins retained"
+    },
+    "watermark-brand-sony_dark.png": {
+      "source": "config/logos/sony_dark.png",
+      "source_sha256": "f49c78b8572030d2f93784ee831815f9b38061a09ac253a831e15f08bdad50eb",
+      "bundled_sha256": "3b9671e37ec01aad97a031a4d78ee72072f2c8e9b035997a5a023b08bb39a333",
+      "transform": "Pillow convertRGBA, encodePNG; original margins retained"
+    },
+    "watermark-brand-xmage.png": {
+      "source": "config/logos/xmage.png",
+      "source_sha256": "8632838d87c2023a3d75df10ec983732f1b09e683c92375b30a1c766558dc52f",
+      "bundled_sha256": "698b5aaccdd44a0d61e3230cc35e97e88f3f34d64114131d5b879be2a3dd8164",
+      "transform": "Pillow convertRGBA, encodePNG; original margins retained"
+    }
+  },
+  "templates": {
+    "standard1": {
+      "source": "config/templates/标准水印.json",
+      "source_sha256": "a09c287dbe5e9c3b5a76919c79dd056d75a1a9febbbb6fb30ac472edc737947a",
+      "bundled_sha256": "53c3a83ef2c640b112a29e3bf53315f48d905e8b1d66f30352e260508abf3f86"
+    },
+    "standard2": {
+      "source": "config/templates/标准水印2.json",
+      "source_sha256": "eaa968b2c3627a82388c6495225cd23bb8a6cba4dbfbf97ed1f8e8eb62df3855",
+      "bundled_sha256": "e42d42264742f38c0b4a8a2aa8333f6454eee9e0a085a327964d39ce2e181826"
+    },
+    "nikon_blur": {
+      "source": "config/templates/尼康专用背景模糊.json",
+      "source_sha256": "e70f7540be1bb37868f495f8f3f2c487362f13799e60948bd01390e0dbdcb65f",
+      "bundled_sha256": "e70f7540be1bb37868f495f8f3f2c487362f13799e60948bd01390e0dbdcb65f"
+    },
+    "blur": {
+      "source": "config/templates/背景模糊.json",
+      "source_sha256": "043c9b20a39ebf571819b6e44d34d92a70855a258699645a6cd536a1cfb345a1",
+      "bundled_sha256": "043c9b20a39ebf571819b6e44d34d92a70855a258699645a6cd536a1cfb345a1"
+    },
+    "normal1": {
+      "source": "config/templates/右下角参数.json",
+      "source_sha256": "8002fbbc88d70399a437f35023a8c531e9c69c4891239b339f12da3ce5d53986",
+      "bundled_sha256": "8002fbbc88d70399a437f35023a8c531e9c69c4891239b339f12da3ce5d53986"
+    },
+    "normal2": {
+      "source": "config/templates/文件夹名+右下角参数.json",
+      "source_sha256": "f74af94c2749567ca959219c5697984ed412bb2725319d6e8b9cef68fcd2fc5e",
+      "bundled_sha256": "859d5781536865afbd896df481776e8985e3c0344b6d200e587eb43f35ec6c86"
+    },
+    "center_logo": {
+      "source": "config/templates/logo居中.json",
+      "source_sha256": "b2acc38858e6c8f4f35a125485ee2f7ade614ddb2fbe82c47013b9ed47a930da",
+      "bundled_sha256": "b2acc38858e6c8f4f35a125485ee2f7ade614ddb2fbe82c47013b9ed47a930da"
+    }
+  },
+  "legacy_reference": {
+    "tag": "build1521",
+    "commit": "2f0915465b9a2be780235f24e4b20dc43f65e8b0"
+  },
+  "processors": {
+    "core.py": {
+      "source_sha256": "33fd2ed60c19e9d8469c150074b8bc43fffaa8f6f74b44866763125859d9e9d6",
+      "adaptation": "application plumbing removed; float composition, resource handles and bounded previews added"
+    },
+    "filters.py": {
+      "source_sha256": "f6743201dd9931106e20c17242f331423fece06b4609231dc7111a650c4841af",
+      "adaptation": "application plumbing removed; float composition, resource handles and bounded previews added"
+    },
+    "generators.py": {
+      "source_sha256": "e17ea0d0ecfc3dffcc65f835164603f07b0bcaa4731f6f70893d45b0eeff02c5",
+      "adaptation": "application plumbing removed; float composition, resource handles and bounded previews added"
+    },
+    "mergers.py": {
+      "source_sha256": "0aae9a7a9750e4412cc32007074023406c972d6fe6bc5347a631a14b90db34ff",
+      "adaptation": "application plumbing removed; float composition, resource handles and bounded previews added"
+    },
+    "types.py": {
+      "source_sha256": "6680d0f76ba057cf91fd200581ab46f0355e3819c06df46200a6d16ab4050c48",
+      "adaptation": "application plumbing removed; float composition, resource handles and bounded previews added"
+    }
+  },
+  "missing_upstream_font": {
+    "name": "SpecialAlphabets P04 Regular.otf",
+    "behavior": "Uses the upstream missing-explicit-font fallback; no substitute font is presented as the original."
+  }
+}

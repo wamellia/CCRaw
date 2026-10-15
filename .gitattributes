@@ -1,0 +1,19 @@
+* text=auto
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.spec text eol=lf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.png binary
+*.ico binary
+*.jpg binary
+*.webp binary
+*.ttf binary
+*.otf binary
+assets/*.txt -text -whitespace
+assets/models/*.json -text -whitespace
+ccraw/resources/licenses/*.txt -text -whitespace
+LICENSE -text -whitespace
+NOTICE -text -whitespace

@@ -1,0 +1,387 @@
+"""Shared visual tokens for Qt controls and custom painters."""
+
+from dataclasses import dataclass
+from ..resources import bundled_path
+from PySide6.QtCore import QSettings
+from PySide6.QtGui import QActionGroup, QColor, QFontDatabase, QPalette
+from PySide6.QtWidgets import QApplication, QMenu, QPushButton, QTreeWidget
+from .disclosure import (
+    disclosure_color,
+    disclosure_path,
+    install_disclosure_filter,
+    set_disclosure,
+    style_hierarchy,
+    style_menu,
+)
+
+
+@dataclass(frozen=True)
+class Theme:
+    background: str
+    panel: str
+    recessed: str
+    elevated: str
+    canvas: str
+    text: str
+    secondary: str
+    disabled: str
+    border: str
+    hover: str
+    track: str
+    active_track: str
+    accent: str
+    selection: str
+    focus: str
+
+
+LIGHT = Theme(
+    '#F0F3F8',
+    '#F7F9FC',
+    '#E9EEF5',
+    '#FFFFFF',
+    '#E0E6EF',
+    '#172439',
+    '#53627A',
+    '#8E9AAE',
+    '#BCC7D6',
+    '#DCE7F6',
+    '#A1B0C6',
+    '#2563B7',
+    '#1668CF',
+    '#D6E7FF',
+    '#1668CF',
+)
+DARK = Theme(
+    '#1E1E1E',
+    '#252526',
+    '#333333',
+    '#3C3C3C',
+    '#1E1E1E',
+    '#D4D4D4',
+    '#BBBBBB',
+    '#858585',
+    '#454545',
+    '#2A2D2E',
+    '#5A5A5A',
+    '#007ACC',
+    '#0E639C',
+    '#04395E',
+    '#007ACC',
+)
+
+
+def tokens(widget=None):
+    palette = widget.palette() if widget is not None else QApplication.palette()
+    return DARK if palette.color(QPalette.Window).lightness() < 128 else LIGHT
+
+
+def color(role, widget=None):
+    return QColor(getattr(tokens(widget), role))
+
+
+def appearance_settings():
+    return QSettings('CCRaw', 'CCRaw')
+
+
+def saved_appearance():
+    from ..settings import get_service
+
+    service = get_service()
+    legacy = appearance_settings()
+    # Portable INI configurations remain an explicit legacy source. Registry
+    # preferences migrate only when the unified JSON has not been written yet.
+    if legacy.format() == QSettings.Format.IniFormat or not service.path.exists():
+        legacy.sync()
+        mode = legacy.value('appearance', 'light')
+        return mode if mode in ('light', 'dark', 'system') else 'light'
+    return service.read()['appearance']['theme']
+
+
+def system_appearance():
+    """Read the Windows app preference without changing the user's system settings."""
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize',
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, 'AppsUseLightTheme')
+        return 'light' if value else 'dark'
+    except (ImportError, OSError):
+        return 'light'
+
+
+def refresh_system_theme(app):
+    if (
+        app.property('appearanceMode') == 'system'
+        and app.property('appearanceResolved') != system_appearance()
+    ):
+        apply_theme(app, 'system')
+
+
+def set_appearance(mode):
+    if mode not in ('light', 'dark', 'system'):
+        raise ValueError('外观模式无效。')
+    settings = appearance_settings()
+    settings.setValue('appearance', mode)
+    settings.sync()
+    from ..settings import get_service
+
+    get_service().update({'appearance': {'theme': mode}})
+    apply_theme(QApplication.instance(), mode)
+
+
+def stylesheet(t):
+    selected_text = t.text if t == DARK else t.accent
+    primary_hover = QColor(t.accent).lighter(120).name() if t == DARK else '#1B79EA'
+    primary_pressed = QColor(t.accent).darker(125).name() if t == DARK else '#1454A4'
+    assets = bundled_path('icons')
+    check = (assets / 'check.svg').as_posix()
+    suffix = '-dark' if t == DARK else ''
+    chevron = (assets / f'chevron{suffix}.svg').as_posix()
+    up = (assets / f'chevron-up{suffix}.svg').as_posix()
+    disclosure_down = disclosure_path('down', t).as_posix()
+    disclosure_right = disclosure_path('right', t).as_posix()
+    disabled_down = disclosure_path('down', t, True).as_posix()
+    disabled_right = disclosure_path('right', t, True).as_posix()
+    return f'''
+QWidget {{ background: {t.background}; color: {t.text}; font-size: 13px; }}
+QMainWindow, QDialog {{ background: {t.background}; }}
+QWidget#topbar, QWidget#library, QWidget#inspector, QWidget#filmstrip {{ background: {t.panel}; }}
+QWidget#topbar {{ border-bottom: 1px solid {t.border}; }}
+QLabel, QCheckBox {{ background: transparent; }}
+QLabel#brand {{ font-size: 18px; font-weight: 600; }}
+QLabel#subtle, QStatusBar QLabel {{ color: {t.secondary}; font-size: 12px; }}
+QLabel#section {{ font-size: 14px; font-weight: 600; padding: 8px 0 6px; }}
+QLabel#navigator, QLabel#imagePreview {{ background: {t.canvas}; border: 0; border-radius: 8px; }}
+QPushButton, QToolButton {{ background: {t.elevated}; border: 1px solid {t.border}; border-radius: 6px; padding: 6px 10px; min-height: 24px; }}
+QPushButton:hover, QToolButton:hover {{ background: {t.hover}; border-color: {t.accent}; }}
+QPushButton:pressed, QToolButton:pressed {{ background: {t.recessed}; }}
+QPushButton:checked, QToolButton:checked {{ background: {t.selection}; color: {t.text}; border-color: {t.accent}; font-weight: 600; }}
+QPushButton:focus, QToolButton:focus {{ border-color: {t.focus}; }}
+QPushButton:disabled, QToolButton:disabled {{ color: {t.disabled}; background: {t.recessed}; border-color: {t.track}; }}
+QPushButton#primary {{ background: {t.accent}; border-color: {t.accent}; color: white; padding: 6px 16px; font-weight: 600; }}
+QPushButton#primary:hover {{ background: {primary_hover}; border-color: {primary_hover}; }}
+QPushButton#primary:pressed {{ background: {primary_pressed}; }}
+QPushButton#primary:disabled {{ background: {t.recessed}; color: {t.disabled}; border-color: {t.track}; }}
+QPushButton::menu-indicator {{ image: url("{disclosure_down}"); width: 16px; height: 16px; subcontrol-origin: padding; subcontrol-position: center right; right: 5px; }}
+QPushButton::menu-indicator:disabled {{ image: url("{disabled_down}"); }}
+QPushButton[hasMenu="true"] {{ padding-right: 26px; }}
+QToolButton::menu-indicator, QToolButton::menu-arrow {{ image: url("{disclosure_down}"); width: 16px; height: 16px; }}
+QToolButton::menu-indicator:disabled, QToolButton::menu-arrow:disabled {{ image: url("{disabled_down}"); }}
+QToolButton#disclosureButton {{ padding: 6px; min-width: 24px; }}
+QToolButton#disclosureButton::menu-indicator {{ image: none; width: 0; height: 0; }}
+QToolButton#toolNavigation {{ padding: 5px 6px; text-align: left; }}
+QTabWidget::pane {{ border: 0; }}
+QTabBar {{ background: {t.recessed}; border-radius: 8px; }}
+QTabBar::tab {{ background: {t.recessed}; color: {t.secondary}; padding: 7px 9px; border: 1px solid {t.border}; border-radius: 6px; }}
+QTabBar::tab:selected {{ background: {t.selection}; color: {t.text}; border-color: {t.accent}; font-weight: 600; }}
+QTabBar::tab:hover:!selected {{ background: {t.hover}; }}
+QSlider {{ min-height: 28px; background: transparent; }}
+QSlider::groove:horizontal {{ height: 4px; background: {t.track}; border-radius: 2px; }}
+QSlider::sub-page:horizontal {{ background: {t.active_track}; border-radius: 2px; }}
+QSlider::handle:horizontal {{ width: 18px; height: 18px; margin: -8px 0; background: {t.elevated}; border: 2px solid {t.active_track}; border-radius: 10px; }}
+QSlider::handle:horizontal:hover, QSlider::handle:horizontal:focus {{ border-color: {t.focus}; }}
+QSlider::sub-page:horizontal:disabled {{ background: {t.track}; }}
+QSlider[parameter="temperature"]::groove:horizontal {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #96B4CC,stop:0.5 {t.track},stop:1 #CEB681); }}
+QSlider[parameter="tint"]::groove:horizontal {{ background: qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 #94B29B,stop:0.5 {t.track},stop:1 #BD9EB7); }}
+QSlider[parameter="temperature"]::sub-page:horizontal, QSlider[parameter="tint"]::sub-page:horizontal {{ background: transparent; }}
+QDoubleSpinBox, QSpinBox, QLineEdit, QComboBox, QTextEdit, QPlainTextEdit {{ background: {t.elevated}; border: 1px solid {t.border}; border-radius: 6px; padding: 5px 8px; min-height: 24px; selection-background-color: {t.selection}; selection-color: {t.text}; }}
+QDoubleSpinBox:focus, QSpinBox:focus, QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QPlainTextEdit:focus {{ border-color: {t.focus}; }}
+QDoubleSpinBox:disabled, QSpinBox:disabled, QComboBox:disabled {{ color: {t.disabled}; }}
+QComboBox {{ padding-right: 30px; }}
+QComboBox::drop-down {{ border-left: 1px solid {t.border}; width: 26px; }}
+QComboBox::down-arrow {{ image: url("{disclosure_down}"); width: 16px; height: 16px; }}
+QComboBox::down-arrow:disabled {{ image: url("{disabled_down}"); }}
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button, QSpinBox::up-button, QSpinBox::down-button {{ width: 18px; border-left: 1px solid {t.border}; background: {t.recessed}; }}
+QDoubleSpinBox::up-arrow, QSpinBox::up-arrow {{ image: url("{up}"); width: 12px; height: 12px; }}
+QDoubleSpinBox::down-arrow, QSpinBox::down-arrow {{ image: url("{chevron}"); width: 12px; height: 12px; }}
+QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover, QSpinBox::up-button:hover, QSpinBox::down-button:hover {{ background: {t.hover}; }}
+QComboBox QAbstractItemView {{ background: {t.elevated}; border: 1px solid {t.border}; padding: 4px; selection-background-color: {t.selection}; selection-color: {selected_text}; }}
+QCheckBox {{ spacing: 8px; padding: 6px 0; }}
+QCheckBox::indicator {{ width: 18px; height: 18px; border: 1px solid {t.secondary}; border-radius: 4px; background: {t.elevated}; }}
+QCheckBox::indicator:hover {{ border-color: {t.accent}; }}
+QCheckBox::indicator:checked {{ background: {t.accent}; border-color: {t.accent}; image: url("{check}"); }}
+QCheckBox::indicator:focus {{ border-color: {t.focus}; }}
+QCheckBox:disabled {{ color: {t.disabled}; }}
+QScrollArea {{ border: 0; background: {t.panel}; }}
+QScrollArea > QWidget > QWidget {{ background: {t.panel}; }}
+QScrollBar:vertical {{ background: {t.recessed}; width: 12px; margin: 2px; }}
+QScrollBar:horizontal {{ background: {t.recessed}; height: 12px; margin: 2px; }}
+QScrollBar::handle {{ background: {t.track}; border-radius: 3px; min-height: 24px; min-width: 24px; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ width: 0; height: 0; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
+QListWidget {{ background: transparent; border: 0; outline: 0; }}
+QTreeWidget {{ background: {t.panel}; border: 1px solid {t.border}; border-radius: 6px; outline: 0; padding: 4px; }}
+QTreeWidget::item {{ min-height: 28px; padding: 4px 6px; border-radius: 4px; }}
+QTreeWidget::item:hover {{ background: {t.hover}; }}
+QTreeWidget::item:selected {{ background: {t.selection}; color: {selected_text}; }}
+QTreeWidget::item:disabled {{ color: {t.disabled}; }}
+QTreeWidget::branch {{ background: transparent; }}
+QTreeWidget::branch:has-children:closed {{ image: url("{disclosure_right}"); }}
+QTreeWidget::branch:has-children:open {{ image: url("{disclosure_down}"); }}
+QTreeWidget::branch:has-children:closed:disabled {{ image: url("{disabled_right}"); }}
+QTreeWidget::branch:has-children:open:disabled {{ image: url("{disabled_down}"); }}
+QGroupBox[settings_group="true"] {{ background: {t.panel}; border: 1px solid {t.border}; border-radius: 6px; margin-top: 12px; padding: 12px 10px 8px; }}
+QGroupBox[settings_group="true"]::title {{ subcontrol-origin: margin; subcontrol-position: top left; left: 10px; padding: 0 5px; color: {t.text}; font-weight: 600; }}
+QLabel#settings-page-title {{ font-size: 18px; font-weight: 600; padding: 0 0 8px; }}
+QToolButton#editorSectionHeader {{ background: {t.recessed}; color: {disclosure_color(t)}; border: 0; border-bottom: 1px solid {t.border}; border-radius: 0; padding: 7px 6px; text-align: left; font-weight: 600; }}
+QToolButton#editorSectionHeader:hover {{ background: {t.hover}; }}
+QToolButton#editorSectionHeader:checked {{ background: {t.selection}; color: {t.text}; }}
+QListWidget::item {{ border: 2px solid transparent; border-radius: 8px; padding: 6px; }}
+QListWidget::item:hover {{ background: {t.hover}; }}
+QListWidget::item:selected {{ background: {t.selection}; color: {selected_text}; }}
+QListWidget#filmstripList::item:selected {{ background: transparent; border-color: {t.accent}; }}
+QListWidget#presetList::item:selected {{ border-color: {t.accent}; }}
+QStatusBar {{ background: {t.panel}; border-top: 1px solid {t.border}; }}
+QStatusBar::item {{ border: 0; }}
+QSplitter::handle {{ background: {t.border}; width: 1px; }}
+QMenuBar {{ background: {t.panel}; padding: 0 8px; }}
+QMenuBar::item {{ background: transparent; padding: 4px 10px; }}
+QMenuBar::item:selected {{ background: {t.hover}; border-radius: 6px; }}
+QMenu {{ background: {t.elevated}; border: 1px solid {t.border}; border-radius: 8px; padding: 4px; }}
+QToolTip {{ background: {t.elevated}; color: {t.text}; border: 1px solid {t.border}; padding: 8px; }}
+QProgressBar {{ background: {t.recessed}; border: 0; border-radius: 2px; text-align: center; }}
+QProgressBar::chunk {{ background: {t.accent}; border-radius: 2px; }}
+QGroupBox {{ border: 0; margin-top: 20px; padding-top: 8px; }}
+QGroupBox::title {{ subcontrol-origin: margin; font-weight: 600; }}
+'''
+
+
+STYLE = stylesheet(LIGHT)
+
+
+def style_swatch(button, swatch, theme=None):
+    button.setProperty('swatchColor', swatch)
+    # A colored button's Window palette reflects its swatch, not the app theme.
+    t = theme or tokens()
+    button.setStyleSheet(
+        f'QPushButton {{background: {swatch}; border: 3px solid transparent; border-radius: 18px; padding: 0; min-width: 30px; max-width: 30px; min-height: 30px; max-height: 30px;}}'
+        f'QPushButton:hover {{border-color: {t.focus};}}'
+        f'QPushButton:checked {{border-color: {t.text};}}'
+        f'QPushButton:focus {{border-color: {t.focus};}}'
+    )
+
+
+def apply_theme(app, mode='light'):
+    """Palette propagation keeps child dialogs and painters synchronized."""
+    if app is None:
+        return LIGHT
+    install_disclosure_filter(app)
+    resolved = system_appearance() if mode == 'system' else mode
+    app.setProperty('appearanceMode', mode)
+    app.setProperty('appearanceResolved', resolved)
+    t = DARK if resolved == 'dark' else LIGHT
+    palette = QPalette()
+    for role, value in {
+        QPalette.Window: t.background,
+        QPalette.WindowText: t.text,
+        QPalette.Base: t.elevated,
+        QPalette.AlternateBase: t.recessed,
+        QPalette.Text: t.text,
+        QPalette.Button: t.panel,
+        QPalette.ButtonText: t.text,
+        QPalette.ToolTipBase: t.elevated,
+        QPalette.ToolTipText: t.text,
+        QPalette.Highlight: t.selection,
+        QPalette.HighlightedText: t.text if t == DARK else t.accent,
+        QPalette.Link: t.accent,
+    }.items():
+        palette.setColor(role, QColor(value))
+    for role in (QPalette.WindowText, QPalette.Text, QPalette.ButtonText):
+        palette.setColor(QPalette.Disabled, role, QColor(t.disabled))
+    style = stylesheet(t)
+    current = app.palette()
+    colors_match = all(
+        current.color(group, role) == palette.color(group, role)
+        for group in (QPalette.Active, QPalette.Inactive, QPalette.Disabled)
+        for role in (
+            QPalette.Window,
+            QPalette.WindowText,
+            QPalette.Base,
+            QPalette.Text,
+            QPalette.Button,
+            QPalette.ButtonText,
+            QPalette.Highlight,
+            QPalette.HighlightedText,
+        )
+    )
+    if colors_match and app.styleSheet() == style:
+        # Each open window receives the settings broadcast. Reapplying the same
+        # application stylesheet forces Qt to repolish every control each time.
+        # Still synchronize new menus and the light/dark/system selection.
+        for widget in app.allWidgets():
+            if isinstance(widget, (AppearanceMenu, AppearanceButton)):
+                widget.sync(mode)
+            if isinstance(widget, QTreeWidget):
+                style_hierarchy(widget, t)
+            if isinstance(widget, QMenu):
+                style_menu(widget, app)
+            if widget.property('disclosureDirection'):
+                set_disclosure(widget, widget.property('disclosureDirection') == 'down', t)
+        return t
+    app.setPalette(palette)
+    app.setStyleSheet(style)
+    font = QFontDatabase.systemFont(QFontDatabase.SystemFont.GeneralFont)
+    font.setPixelSize(13)
+    app.setFont(font)
+    for widget in app.allWidgets():
+        if isinstance(widget, (AppearanceMenu, AppearanceButton)):
+            widget.sync(mode)
+        if isinstance(widget, QTreeWidget):
+            style_hierarchy(widget, t)
+        if isinstance(widget, QMenu):
+            style_menu(widget, app)
+        if widget.property('disclosureDirection'):
+            set_disclosure(widget, widget.property('disclosureDirection') == 'down', t)
+        if widget.property('symbol'):
+            from .icons import set_icon
+
+            set_icon(widget, widget.property('symbol'), bool(widget.property('filled')))
+        if widget.property('swatchColor'):
+            style_swatch(widget, widget.property('swatchColor'), t)
+        widget.update()
+    return t
+
+
+class AppearanceMenu(QMenu):
+    def __init__(self, parent):
+        super().__init__('外观', parent)
+        self.group = QActionGroup(self)
+        self.group.setExclusive(True)
+        self.mode_actions = {}
+        for title, mode in [('浅色', 'light'), ('深色', 'dark'), ('跟随系统', 'system')]:
+            action = self.addAction(title)
+            action.setCheckable(True)
+            action.setData(mode)
+            self.group.addAction(action)
+            action.triggered.connect(lambda checked=False, value=mode: set_appearance(value))
+            self.mode_actions[mode] = action
+        self.sync('dark' if tokens() == DARK else 'light')
+
+    def sync(self, mode):
+        self.mode_actions.get(mode, self.mode_actions['light']).setChecked(True)
+
+
+class AppearanceButton(QPushButton):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setMinimumHeight(36)
+        self.setMinimumWidth(134)
+        self.setAccessibleName('外观')
+        self.setToolTip('切换浅色或深色外观')
+        self.appearance_menu = AppearanceMenu(self)
+        self.setMenu(self.appearance_menu)
+        self.setProperty('hasMenu', True)
+        from .icons import set_icon
+
+        set_icon(self, 'light')
+        self.sync('dark' if tokens() == DARK else 'light')
+
+    def sync(self, mode):
+        self.setText(
+            {'dark': '外观：深色', 'light': '外观：浅色', 'system': '外观：跟随系统'}.get(
+                mode, '外观：浅色'
+            )
+        )
