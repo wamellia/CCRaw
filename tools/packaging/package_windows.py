@@ -20,10 +20,12 @@ OUTPUT = PACKAGES / f'CCRaw-{__version__}-Windows.zip'
 
 
 def write_checksums():
-    """SHA256SUMS.txt for the portable ZIP and installer, as published on Releases."""
+    """SHA256SUMS.txt for every binary and source asset published on Releases."""
     lines = []
-    for path in sorted(PACKAGES.glob(f'CCRaw-{__version__}-*')):
-        if path.suffix.lower() in ('.zip', '.exe'):
+    for path in sorted(PACKAGES.iterdir()):
+        if path.is_file() and (
+            path.suffix.lower() in ('.zip', '.exe', '.whl') or path.name.endswith('.tar.gz')
+        ):
             with path.open('rb') as stream:
                 lines.append(f'{hashlib.file_digest(stream, "sha256").hexdigest()}  {path.name}')
     (PACKAGES / 'SHA256SUMS.txt').write_text('\n'.join(lines) + '\n', encoding='utf-8')
@@ -59,6 +61,16 @@ def main():
     invalid = verify(runtime, manifest)
     if invalid:
         raise SystemExit('Frozen resource verification failed: ' + ', '.join(invalid))
+    from ccraw.photo_agent.models import MANIFEST, digest
+
+    for spec in MANIFEST['files']:
+        path = runtime / 'assets/agent-models' / spec['name']
+        if (
+            not path.is_file()
+            or path.stat().st_size != spec['bytes']
+            or digest(path) != spec['sha256']
+        ):
+            raise SystemExit('Frozen Agent model verification failed: ' + spec['name'])
     for name in ('LICENSE', 'NOTICE', 'THIRD_PARTY.md', 'licenses/manifest.json'):
         if not (runtime / name).is_file():
             raise SystemExit('Missing distribution license: ' + name)

@@ -8,7 +8,7 @@ recursive-include .github *.yml
 recursive-include ccraw *.py *.svg *.ico *.png *.jpg *.webp *.json *.ttf *.otf *.txt
 recursive-include ccraw/resources *.dll
 recursive-include assets *.json *LICENSE*.txt OFL.txt ccraw.ico ccraw.svg
-recursive-include tools *.py *.ps1 *.cmd *.md
+recursive-include tools *.py *.ps1 *.cmd *.md *.isl
 recursive-include tests *.py
 recursive-include tests/fixtures/watermark-standard1 *.png *.json
 recursive-include docs *.md *.webp
@@ -21,3 +21,4 @@ prune release-assets
 prune licenses
 prune .pytest_cache
 prune .asset-cache
+prune assets/agent-models

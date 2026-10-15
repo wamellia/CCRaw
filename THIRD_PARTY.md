@@ -10,7 +10,7 @@
 |---|---|
 | 基础运行依赖 | 源码安装通过 `requirements/base.txt` 获取；Windows 便携构建按所用环境收集库、动态文件及许可 |
 | 包内资源 | 按用途分组位于 `ccraw/resources/`，由 Python 包与 Windows 打包配置递归收集，例如色彩管理 DLL、字体及许可文本 |
-| 可选运行依赖 | 仅在选择 Agent、MCP 或 GPU 环境时安装，不能视为基础安装的一部分 |
+| 可选运行依赖 | 仅在选择 Agent、MCP 或 GPU 环境时安装，源码安装按需启用；完整桌面发行包包含 Agent 运行时 |
 | 可选模型与工具 | 大型模型和元数据工具由独立资源包或显式下载提供，轻量源码包不包含全部权重 |
 | 格式或结构参考 | 说明读取格式或网络结构的来源，不表示分发了整个上游程序、训练框架或数据库 |
 | 构建与验证工具 | 用于生成发行物或检查样片，不是用户进行基础照片编辑所必需的运行组件 |
@@ -104,7 +104,7 @@ Qt、Python 绑定和 FFmpeg 是不同层次的组件。记录界面库版本时
 | YuNet `face_detection_yunet_2023mar.onnx` | 本地人脸检测候选，来自 OpenCV Zoo 固定提交 `47534e27c9851bb1128ccc0102f1145e27f23f98` | **MIT**；以该模型目录许可为准，不直接套用 Zoo 根目录许可；[模型目录](https://github.com/opencv/opencv_zoo/tree/main/models/face_detection_yunet) · [固定版本许可](https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_detection_yunet/LICENSE) · [本地许可](ccraw/resources/licenses/YuNet-LICENSE.txt) |
 | SFace `face_recognition_sface_2021dec.onnx` | 本地匿名人物特征和聚类候选，来自同一固定 OpenCV Zoo 提交 | **Apache-2.0**；[模型目录](https://github.com/opencv/opencv_zoo/tree/main/models/face_recognition_sface) · [固定版本许可](https://raw.githubusercontent.com/opencv/opencv_zoo/47534e27c9851bb1128ccc0102f1145e27f23f98/models/face_recognition_sface/LICENSE) · [本地许可](ccraw/resources/licenses/SFace-LICENSE.txt) |
 
-以上模型由显式安装流程获取，文件大小、固定 URL 和 SHA-256 见 [agent-models.json](ccraw/resources/models/agent-models.json)。不是随轻量源码仓库直接分发全部模型；模型目录也不代表存在真实身份识别授权。
+源码环境中的模型由显式安装流程获取，文件大小、固定 URL 和 SHA-256 见 [agent-models.json](ccraw/resources/models/agent-models.json)。轻量源码和 wheel 不包含这些权重；完整 Windows 安装包与便携包包含清单中的已校验模型。
 
 ### 5.2 细节增强、降噪与自动选区
 
@@ -166,6 +166,8 @@ README 的摄影样片界面截图使用维护者提供并指定用于功能展�
 | PyInstaller 6.22.3 | 构建 Windows 应用，生成程序包含引导程序及必要运行时部分 | GPL-2.0-or-later 与 Bootloader Exception；部分运行时 hooks / 模块为 Apache-2.0，不能只写一个 GPL 标签；[项目](https://github.com/pyinstaller/pyinstaller) · [官方许可说明](https://pyinstaller.org/en/stable/license.html) |
 | Inno Setup | 仅在使用该编译器时生成 Windows 安装程序，不是基础照片编辑的 Python 运行依赖 | 遵循所选 Inno Setup 编译器版本自身条款；[官方项目](https://jrsoftware.org/) · [当前许可全文](https://jrsoftware.org/files/is/license.txt) |
 | raw.pixls.us 测试样片 | 用于 RAW 兼容性和技术验证；所采用记录标注为 CC0 的样片，原始大文件不随轻量源码或 Python 包分发 | [样片库](https://raw.pixls.us/)；具体选择仍按下载记录与各样片的实际授权确认 |
+
+安装器的[简体中文消息](tools/packaging/languages/ChineseSimplified.isl)固定取自 [Inno Setup 6.7.3 源码](https://github.com/jrsoftware/issrc/blob/is-6_7_3/Files/Languages/Unofficial/ChineseSimplified.isl)，编译时使用本地文件。
 
 ## 八、版本、许可文件与构建记录
 

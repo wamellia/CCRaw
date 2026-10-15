@@ -1,7 +1,12 @@
-# Windows x64 build; collects the active ONNX Runtime (Windows ML build with DirectML) and windowsml.
+# Windows x64 build; collects the active ONNX Runtime and optional Windows ML components.
 from pathlib import Path
 import os
 from PyInstaller.utils.hooks import collect_all, collect_data_files, copy_metadata
+from PyInstaller.utils.win32.versioninfo import (
+    VSVersionInfo, FixedFileInfo, StringFileInfo, StringTable, StringStruct,
+    VarFileInfo, VarStruct,
+)
+from ccraw import __version__
 
 root = Path(SPECPATH)
 raw_data, raw_binaries, raw_hidden = collect_all('rawpy')
@@ -26,7 +31,23 @@ if os.name == 'nt':
                   if Path(item[0]).name.lower() != 'icuuc.dll'
                   and not Path(item[0]).name.lower().startswith('icudt')]
 pyz = PYZ(a.pure)
+version_numbers = tuple(int(part) for part in __version__.split('.')) + (0,)
+windows_version = VSVersionInfo(
+    ffi=FixedFileInfo(filevers=version_numbers, prodvers=version_numbers,
+                     mask=0x3f, flags=0, OS=0x40004, fileType=1, subtype=0, date=(0, 0)),
+    kids=[StringFileInfo([StringTable('040904B0', [
+        StringStruct('CompanyName', 'CCRaw'),
+        StringStruct('FileDescription', 'CCRaw photo editor and Photo Agent'),
+        StringStruct('FileVersion', __version__),
+        StringStruct('InternalName', 'CCRaw'),
+        StringStruct('OriginalFilename', 'CCRaw.exe'),
+        StringStruct('ProductName', 'CCRaw-Pro'),
+        StringStruct('ProductVersion', __version__),
+        StringStruct('LegalCopyright', 'Copyright (c) 2026 CCRaw contributors'),
+    ])]), VarFileInfo([VarStruct('Translation', [1033, 1200])])],
+)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name='CCRaw',
           debug=False, bootloader_ignore_signals=False, strip=False, upx=False,
-          console=False, disable_windowed_traceback=False, icon=str(root/'assets/ccraw.ico'))
+          console=False, disable_windowed_traceback=False, icon=str(root/'assets/ccraw.ico'),
+          version=windows_version)
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='CCRaw')

@@ -21,6 +21,8 @@ Import a downloaded editor runtime bundle, substituting its actual filename:
 .\.venv\Scripts\python.exe tools/assets/fetch_assets.py --verify-only
 ```
 
+The Windows installer and portable ZIP include verified Agent models. A desktop build uses these bundled files when a complete user installation is absent. Explicit downloads still write to per-user storage; they never modify the application bundle.
+
 Agent models and editor runtime assets use separate installation paths and manifests. Agent models default to `%LOCALAPPDATA%/CCRaw/agent-models`; `CCRAW_AGENT_MODEL_DIR` can override that location. The [runtime manifest](../../assets/runtime-assets.json) describes editor resources, including the speech model and tokens. Files are checked against the relevant manifest; an installed inference runtime and suitable provider are also required to use a model. Optional acceleration depends on the environment, while CPU inference is available for supported models.
 
 The JSON files in [assets/models/](../../assets/models/) record concrete architectures, source weights, native scales and conversion metadata. Large models are excluded from the lightweight Python wheel and source archive. The base package includes its Chinese font and OFL license. Maintainers can rebuild the corresponding ONNX resources with `tools/models/convert_*.py`; conversions must retain provenance, precision checks and updated checksums.

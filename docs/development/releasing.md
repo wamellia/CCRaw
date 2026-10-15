@@ -22,7 +22,7 @@
 .\build-release.cmd
 ```
 
-入口调用 `tools/packaging/build_release.ps1`：创建隔离环境、安装锁定依赖、检查依赖和资源、运行测试、收集许可证，随后构建 PyInstaller 应用、运行冻结程序检查并生成便携包和校验文件。大型运行资源需先安装；缺失资源会使校验失败。
+入口调用 `tools/packaging/build_release.ps1`：创建隔离环境、安装锁定依赖、检查依赖和资源、运行测试、收集许可证，随后构建 PyInstaller 应用、运行冻结程序检查并生成便携包和校验文件。大型运行资源与 Agent 本地模型需先安装；缺失资源会使校验失败。`tools/packaging/prepare_agent_models.py` 只从本机已校验的模型缓存复制清单中的五个公共文件，不包含用户配置或凭据。
 
 直接调用 PowerShell 脚本可以指定已准备的解释器、资源包或 Inno Setup 编译器：
 

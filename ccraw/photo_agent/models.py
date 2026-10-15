@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import threading
 import urllib.request
 import uuid
@@ -13,7 +14,7 @@ import numpy as np
 from PIL import Image
 
 from .. import host, performance
-from ..resources import bundled_path
+from ..resources import asset_path, bundled_path
 
 MANIFEST = json.loads(bundled_path('models', 'agent-models.json').read_text(encoding='utf8'))
 SIGNATURE = MANIFEST['signature']
@@ -31,10 +32,25 @@ SCENES = (
 )
 
 
-def model_root():
-    return Path(
-        os.environ.get('CCRAW_AGENT_MODEL_DIR', host.data_folder() / 'agent-models')
-    ).resolve()
+def _complete_folder(root):
+    try:
+        return all(
+            (root / spec['name']).is_file()
+            and (root / spec['name']).stat().st_size == spec['bytes']
+            for spec in MANIFEST['files']
+        )
+    except OSError:
+        return False
+
+
+def model_root(*, writable=False):
+    override = os.environ.get('CCRAW_AGENT_MODEL_DIR')
+    user = Path(override or host.data_folder() / 'agent-models').resolve()
+    if not writable and not override and getattr(sys, 'frozen', False):
+        bundled = asset_path('agent-models')
+        if not _complete_folder(user) and _complete_folder(bundled):
+            return bundled
+    return user
 
 
 def digest(path, cancel=None):
@@ -48,7 +64,7 @@ def digest(path, cancel=None):
 
 
 def install_models(cancel=None, progress=lambda *_: None):
-    root = model_root()
+    root = model_root(writable=True)
     root.mkdir(parents=True, exist_ok=True)
     for i, spec in enumerate(MANIFEST['files']):
         path = root / spec['name']

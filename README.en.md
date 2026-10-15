@@ -1,4 +1,4 @@
-# CCRaw-Pro v1.2
+# CCRaw-Pro v1.2.1
 
 [简体中文](README.md) | English
 
@@ -10,7 +10,7 @@ Original files stay in their own locations. Edits are stored as reversible param
 
 **Windows x64 · Chinese / English · Python 3.12 recommended · MIT source license**
 
-[Download v1.2](https://github.com/wamellia/CCRaw/releases/tag/v1.2) · [Install and run](#install-and-run) · [Product overview](#product-overview) · [Documentation](#documentation-and-contributing)
+[Download v1.2.1](https://github.com/wamellia/CCRaw/releases/tag/v1.2.1) · [Install and run](#install-and-run) · [Product overview](#product-overview) · [Documentation](#documentation-and-contributing)
 
 ![CCRaw photo editor in deep-gray mode](docs/screenshots/editor-dark.webp)
 
@@ -358,10 +358,19 @@ The editor shows the GPU model, dedicated memory and current route. Settings →
 | Python | 64-bit 3.12 recommended; package metadata allows 3.12–3.13 |
 | Basic editing | CPU execution, with automatic acceleration according to driver/runtime support |
 | Agent conversations | Optional Agent dependencies and a tool-calling model service |
-| Semantic search and person clustering | Separately installed local models |
+| Semantic search and person clustering | Included in desktop distributions; optional setup for source and wheel installs |
 | AI generation | A separately configured compatible service and credentials |
 
-### Option 1: Run from source
+### Option 1: Windows installer or portable application
+
+Download from the [v1.2.1 Release](https://github.com/wamellia/CCRaw/releases/tag/v1.2.1):
+
+- **Installer:** run `CCRaw-1.2.1-Setup.exe` and follow the setup wizard.
+- **Portable:** fully extract `CCRaw-1.2.1-Windows.zip`, then open `CCRaw-Windows/CCRaw.exe`. Keep the `_internal` folder beside the executable.
+
+Both desktop distributions include Python, editor resources and local Agent models. No separate Python installation is required. Configure your own services for online conversations and image generation. Projects, preferences and downloaded caches use per-user storage.
+
+### Option 2: Run from source
 
 Download the source, or clone with Git:
 
@@ -381,22 +390,22 @@ For Agent conversations or MCP, add the optional dependencies in the same enviro
 .\.venv\Scripts\python.exe -m pip install -r requirements/agent.txt
 ```
 
-### Option 2: Install the Python release package
+### Option 3: Install the Python release package
 
-The [v1.2 Release](https://github.com/wamellia/CCRaw/releases/tag/v1.2) provides `ccraw-1.2.0-py3-none-win_amd64.whl`, a source archive and checksums. Replace the example path with the downloaded wheel location:
+The [v1.2.1 Release](https://github.com/wamellia/CCRaw/releases/tag/v1.2.1) provides `ccraw-1.2.1-py3-none-win_amd64.whl`, a source archive and checksums. Replace the example path with the downloaded wheel location:
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install "C:\Downloads\ccraw-1.2.0-py3-none-win_amd64.whl"
+.\.venv\Scripts\python.exe -m pip install "C:\Downloads\ccraw-1.2.1-py3-none-win_amd64.whl"
 .\.venv\Scripts\ccraw.exe
 ```
 
-The installed `ccraw.exe` is an entry point inside the virtual environment and still requires that Python environment. This release's new features are supplied through source and Python packages; consult the corresponding release notes when downloading portable applications from other releases.
+The installed `ccraw.exe` is an entry point inside the virtual environment and still requires that Python environment. Choose the installer or portable distribution to run the desktop application directly.
 
 Wheel users can enable optional Agent dependencies when installing:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install "C:\Downloads\ccraw-1.2.0-py3-none-win_amd64.whl[agent]"
+.\.venv\Scripts\python.exe -m pip install "C:\Downloads\ccraw-1.2.1-py3-none-win_amd64.whl[agent]"
 ```
 
 ### Add models and runtime resources as needed
@@ -404,7 +413,7 @@ Wheel users can enable optional Agent dependencies when installing:
 | Capability | Configuration |
 |---|---|
 | Agent conversations and natural-language editing | Settings → AI and services → Conversation and editing; configure a local/cloud service and model |
-| Local semantic retrieval and person clustering | Settings → AI and services → Local models; download verified models |
+| Local semantic retrieval and person clustering | Included in desktop builds; source and wheel users can download from Settings |
 | Optional AI detail, automatic selections, speech and complete metadata tooling | Install the corresponding runtime resources and enable available models |
 | Image generation | Generation settings; enter the endpoint, model and API key |
 

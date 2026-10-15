@@ -12,6 +12,7 @@
 *.webp binary
 *.ttf binary
 *.otf binary
+*.isl -text -whitespace
 assets/*.txt -text -whitespace
 assets/models/*.json -text -whitespace
 ccraw/resources/licenses/*.txt -text -whitespace

@@ -5,7 +5,7 @@
   #define AppBuild "dist\CCRaw"
 #endif
 #ifndef AppVersion
-  #define AppVersion "1.2.0"
+  #define AppVersion "1.2.1"
 #endif
 #define PackageDir "v" + StringChange(AppVersion, ".", "")
 
@@ -37,7 +37,7 @@ CreateUninstallRegKey=not PortableMode
 UsePreviousAppDir=not PortableMode
 
 [Languages]
-Name: "zhcn"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "zhcn"; MessagesFile: "tools\packaging\languages\ChineseSimplified.isl"
 Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]

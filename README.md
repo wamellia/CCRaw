@@ -1,4 +1,4 @@
-# CCRaw-Pro v1.2
+# CCRaw-Pro v1.2.1
 
 简体中文 | [English](README.en.md)
 
@@ -10,7 +10,7 @@ CCRaw 是一款开源桌面照片软件，将 RAW 编辑器、相册管理和 Ph
 
 **Windows x64 · 中文 / English · Python 3.12 推荐 · MIT 源码许可**
 
-[下载 v1.2](https://github.com/wamellia/CCRaw/releases/tag/v1.2) · [安装与启动](#安装与启动) · [产品概览](#产品概览) · [使用文档](#文档与参与)
+[下载 v1.2.1](https://github.com/wamellia/CCRaw/releases/tag/v1.2.1) · [安装与启动](#安装与启动) · [产品概览](#产品概览) · [使用文档](#文档与参与)
 
 ![CCRaw 深灰色照片编辑工作区](docs/screenshots/editor-dark.webp)
 
@@ -228,7 +228,7 @@ Agent 共用完整编辑器的 Photo Engine。它读取已导入照片的本地�
 
 ### 模型按需要接入
 
-Agent 默认复用「修图指令」的对话配置，可使用 Ollama、LM Studio 等本地服务，或你配置的云端接口；所选模型必须支持工具调用。语义检索与人物聚类使用独立本地模型，在「设置 → AI 与服务 → 本地模型」安装校验后的 **CLIP、YuNet 和 SFace**，约 **186 MiB**。
+Agent 默认复用「修图指令」的对话配置，可使用 Ollama、LM Studio 等本地服务，或你配置的云端接口；所选模型必须支持工具调用。语义检索与人物聚类使用 **CLIP、YuNet 和 SFace**，约 **186 MiB**。桌面安装版与便携版已随包提供；源码和 wheel 用户可在「设置 → AI 与服务 → 本地模型」安装。
 
 没有 LLM 时，仍能扫描、查看整理建议、按文件名 / 标签 / 元数据检索，以及使用本地推荐修图。安装语义模型后可使用本地语义检索；复杂中文描述与组合条件更适合通过 Agent 对话转换为查询。
 
@@ -358,10 +358,19 @@ Agent 默认复用「修图指令」的对话配置，可使用 Ollama、LM Stud
 | Python | 推荐 3.12 64 位；包声明支持 3.12–3.13 |
 | 基础编辑 | CPU 可运行，自动加速按驱动与运行环境启用 |
 | Photo Agent 对话 | 可选 Agent 依赖，以及支持工具调用的模型服务 |
-| 语义检索与人物聚类 | 单独安装的本地模型 |
+| 语义检索与人物聚类 | 桌面发行包已包含本地模型；源码和 wheel 可单独安装 |
 | AI 生成 | 单独配置的兼容服务及其访问凭据 |
 
-### 方式一：从源码启动
+### 方式一：Windows 安装版或便携版
+
+从 [v1.2.1 Release](https://github.com/wamellia/CCRaw/releases/tag/v1.2.1) 下载：
+
+- **安装版：** `CCRaw-1.2.1-Setup.exe`，运行后按向导安装，可创建快捷方式。
+- **便携版：** `CCRaw-1.2.1-Windows.zip`，完整解压后打开 `CCRaw-Windows/CCRaw.exe`。保留同目录下的 `_internal` 文件夹。
+
+两种桌面发行物均包含 Python 运行时、照片编辑资源和本地 Agent 模型，无需另装 Python。在线对话和图像生成需要在软件设置中配置自己的服务。工程、设置和下载缓存按用户目录保存。
+
+### 方式二：从源码启动
 
 下载源码，或使用 Git：
 
@@ -381,22 +390,22 @@ py -3.12 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements/agent.txt
 ```
 
-### 方式二：安装 Python 发布包
+### 方式三：安装 Python 发布包
 
-[v1.2 Release](https://github.com/wamellia/CCRaw/releases/tag/v1.2) 提供 `ccraw-1.2.0-py3-none-win_amd64.whl`、源码包及校验文件。将路径替换为 wheel 的下载位置：
+[v1.2.1 Release](https://github.com/wamellia/CCRaw/releases/tag/v1.2.1) 提供 `ccraw-1.2.1-py3-none-win_amd64.whl`、源码包及校验文件。将路径替换为 wheel 的下载位置：
 
 ```powershell
 py -3.12 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install "C:\Downloads\ccraw-1.2.0-py3-none-win_amd64.whl"
+.\.venv\Scripts\python.exe -m pip install "C:\Downloads\ccraw-1.2.1-py3-none-win_amd64.whl"
 .\.venv\Scripts\ccraw.exe
 ```
 
-wheel 安装后的 `ccraw.exe` 是虚拟环境中的启动入口，仍依赖该 Python 环境。此 Release 的新增功能通过源码或 Python 包提供；下载其他 Release 的便携程序时，请以对应版本说明为准。
+wheel 安装后的 `ccraw.exe` 是虚拟环境中的启动入口，仍依赖该 Python 环境。希望直接运行桌面程序时，请选择安装版或便携版。
 
 wheel 用户需要 Agent 时，可在安装包的同时启用可选依赖：
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install "C:\Downloads\ccraw-1.2.0-py3-none-win_amd64.whl[agent]"
+.\.venv\Scripts\python.exe -m pip install "C:\Downloads\ccraw-1.2.1-py3-none-win_amd64.whl[agent]"
 ```
 
 ### 按需安装模型与运行资源
@@ -404,7 +413,7 @@ wheel 用户需要 Agent 时，可在安装包的同时启用可选依赖：
 | 想启用的能力 | 配置入口 |
 |---|---|
 | Agent 对话与自然语言修图 | 设置 → AI 与服务 → 对话与修图；填写本地服务或云端接口与模型 |
-| 本地语义检索和人物聚类 | 设置 → AI 与服务 → 本地模型；下载校验模型 |
+| 本地语义检索和人物聚类 | 完整桌面版已包含；源码和 wheel 可在设置中下载 |
 | AI 细节、自动选区、语音及完整元数据工具等可选能力 | 安装对应运行资源，按模型可用性启用 |
 | 图像生成 | 图像生成的设置入口；配置接口地址、模型与 API Key |
 
